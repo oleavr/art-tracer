@@ -1,0 +1,22 @@
+{
+  "name": "frida-agent-example",
+  "version": "1.0.0",
+  "description": "Example Frida agent written in TypeScript",
+  "private": true,
+  "main": "agent/index.ts",
+  "scripts": {
+    "prepare": "npm run build",
+    "build": "frida-compile agent/index.ts -o _agent.js -x",
+    "watch": "frida-compile agent/index.ts -o _agent.js -x -w"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.1.2",
+    "@babel/plugin-transform-runtime": "^7.1.0",
+    "@babel/preset-env": "^7.1.0",
+    "@babel/runtime-corejs2": "^7.1.2",
+    "@types/node": "^10.11.3",
+    "frida-compile": "^8.0.0",
+    "frida-gum-types": "^2.0.7",
+    "frida-java": "^2.0.6"
+  }
+}
