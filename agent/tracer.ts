@@ -65,7 +65,19 @@ export function trace(callbacks: TraceCallbacks) {
     log("trace() starting up");
 
     const runtime = api.artRuntime;
-    const instrumentation = runtime.add(488);
+    const instrumentationOffset = 488;
+    const instrumentation = runtime.add(instrumentationOffset);
+
+    const helperPath = "/data/local/tmp/re.frida.server/libart-tracer-helper.so";
+    const dlopen: any = new NativeFunction(Module.findExportByName(null, "dlopen") as NativePointer, "pointer", ["pointer", "int"]);
+    const helper = dlopen(Memory.allocUtf8String(helperPath), 3);
+    if (!helper.isNull()) {
+        const getOffsetOfRuntimeInstrumentation: any = new NativeFunction(Module.findExportByName(helperPath, "ath_get_offset_of_runtime_instrumentation") as NativePointer, "uint", []);
+        log("we think instrumentation is at offset " + instrumentationOffset + ", helper thinks it's at " + getOffsetOfRuntimeInstrumentation());
+    } else {
+        const dlerror: any = new NativeFunction(Module.findExportByName(null, "dlerror") as NativePointer, "pointer", []);
+        log("failed to load helper: " + Memory.readUtf8String(dlerror()));
+    }
 
     const addListener: any = new NativeFunction(
         Module.findExportByName("libart.so","_ZN3art15instrumentation15Instrumentation11AddListenerEPNS0_23InstrumentationListenerEj") as NativePointer,

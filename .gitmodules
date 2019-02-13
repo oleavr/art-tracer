@@ -1,0 +1,6 @@
+[submodule "ext/art"]
+	path = ext/art
+	url = https://android.googlesource.com/platform/art
+[submodule "ext/system-core"]
+	path = ext/system-core
+	url = https://android.googlesource.com/platform/system/core
