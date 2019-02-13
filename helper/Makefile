@@ -14,7 +14,7 @@ deploy: build/libart-tracer-helper.so
 build/build.ninja: meson.build
 	rm -rf build
 	. $$FRIDA/build/frida-meson-env-$(build_platform)-x86_64.rc \
-		&& meson \
+		&& python3 $$FRIDA/releng/meson/meson.py \
 			--buildtype minsize \
 			--cross-file $$FRIDA/build/frida-android-x86.txt \
 			build .
