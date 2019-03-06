@@ -1,0 +1,4 @@
+option('ndk_toolchain', type : 'string', value : '/home/lavoisier/svn_workspace/wapet/security/fridaDroid/ndk-toolchain', description : 'ndk toolchain created by the user')
+option('other_one', type : 'boolean', value : false)
+option('combo_opt', type : 'combo', choices : ['one', 'two', 'three'], value : 'three')
+
