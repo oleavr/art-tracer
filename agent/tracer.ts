@@ -27,7 +27,7 @@ enum InstrumentationEvent {
 
 const retainedHandles: any[] = [];  // to keep calbacks alive
 
-let invoke_attached: number = 0;
+let attachCurrentThread_attached = 0;
 
 let listener: NativePointer;
 try {
@@ -97,7 +97,20 @@ const findMethodForProxy: any = new NativeFunction(
     {
         exceptions: ExceptionsBehavior.Propagate
     }); 
-
+const runtimeAttachCurrentThread: any = new NativeFunction(
+    dlsym(artlib,"_ZN3art7Runtime19AttachCurrentThreadEPKcbP8_jobjectb"),
+    "bool",
+    ["pointer","bool","pointer","bool"],
+    {
+        exceptions: ExceptionsBehavior.Propagate
+    }); 
+/*const runtimeAttachCurrentThread: any = new NativeFunction(
+    dlsym(artlib,"_ZN3art7Runtime19AttachCurrentThreadEPKcbP8_jobjectb"),
+    "boolean",
+    ["pointer","boolean","pointer","boolean"],
+    {
+        exceptions: ExceptionsBehavior.Propagate
+    });*/
 
 
     
@@ -115,7 +128,7 @@ export function trace(callbacks: TraceCallbacks) {
         log("we think instrumentation is at offset " + instrumentationOffset + ", helper thinks it's at " + getOffsetOfRuntimeInstrumentation());    
         
         const getOffsetOfClassIftable: any = new NativeFunction(dlsym(helper, "ath_get_offset_of_class_iftable_"), "uint", []);
-        log("we think instrumentation is at offset " + 16 + ", helper thinks it's at " + getOffsetOfClassIftable());    
+        log("we think  types ids is at offset " + 16 + ", helper thinks it's at " + getOffsetOfClassIftable());    
 
 
         
@@ -138,7 +151,10 @@ export function trace(callbacks: TraceCallbacks) {
         });
         log("address of getShorty in the helper" + helperGetShorty);*/
         //printAsmExploreCallsGetShorty(helperGetShorty,1000)
-
+       
+        log("address of runtimeAttachCurrentThread in the helper" + runtimeAttachCurrentThread);
+            //printAsmExploreCallsGetShorty(helperGetShorty,1000)
+    
       
 
         
@@ -358,7 +374,7 @@ function makeMethodEntered(): NativePointer {
                     let prospective_method: NativePointer  = Memory.readPointer(prospective_shadowFrame.add(1*Process.pointerSize));
                     if(prospective_method.equals(this.method)){
                         log(" //////////////**start**/////////////");
-                        log("methodEntered: called from: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t"));
+                        //log("methodEntered: called from: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t"));
                         log("Method: " + prospective_method);
                         //log("called from: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t"));
                         log("Shadow frame :" + prospective_shadowFrame + " thread position " + i);
@@ -390,6 +406,7 @@ function makeMethodEntered(): NativePointer {
                             log("Interface Method obtained" + interfaceMethod);
 
                             // NOW GETTING THE SHORTY FROM THE INTERFACE METHOD (method_index means index in the corresponding method_ids in the dex_file)(and the methood_id is the index in string_ids)
+                          
                             let declaringClass: NativePointer = Memory.readPointer(interfaceMethod);
                             log ("Declaring class = " + declaringClass);
                             let dexCache: NativePointer = Memory.readPointer(declaringClass.add(16));
@@ -400,28 +417,60 @@ function makeMethodEntered(): NativePointer {
                             log("dex_method_index" + dex_method_index);
                             let method_ids: NativePointer =  Memory.readPointer(dexfile.add(48));
                             log("method_ids array" + method_ids);
-                            let method_id: NativePointer = Memory.readPointer(method_ids.add(dex_method_index*8 + 2));
-                            log("method_id " + method_id);
+                            
+                            let proto_index: number = Memory.readU16(method_ids.add(dex_method_index*8 + 2));
+                            log("proto index " + proto_index);
+                           
+
                             let proto_ids: NativePointer =  Memory.readPointer(dexfile.add(52));
                             log("proto_ids array: " + proto_ids);
-                            let proto_index: number  =  method_id.add(method_id.shl(1)).toInt32();// - ----------------- to see deeply
-                            log("proto index " + proto_index);
-                            let proto_id: NativePointer =  Memory.readPointer(proto_ids.add(proto_index * 4));
-                            log("proto_id in the array" + proto_id);
+                            let proto_index_old: number  =  ptr(proto_index).add(ptr(proto_index).shl(1)).toInt32();// - ----------------- to see deeply (okay just a compiler trick to multiply by 3)
+                            log("proto index old: " + proto_index_old);
+                           
+                            let proto_id_old: NativePointer = proto_ids.add(proto_index_old * 4);  /// can be used to obtain the return type
+                            log("proto_id address old " + proto_id_old);
+                            
+                            let shorty_idx_old: NativePointer =  Memory.readPointer(proto_id_old);
+                            log("shorty_idx  old " + shorty_idx_old);
+                           
                             let string_ids: NativePointer = Memory.readPointer(dexfile.add(36));
                             log("string_ids array " + string_ids);
                             let dex_file_begin: NativePointer = Memory.readPointer(dexfile.add(4));
                             log("dex_file_begin " + dex_file_begin);
-                            let prototype_string_offset: NativePointer = Memory.readPointer(string_ids.add(proto_id.shl(2)));
-                            log("prototype_string offsett " + prototype_string_offset);
-                            if(Memory.readPointer(dex_file_begin.add(prototype_string_offset)).equals(NULL)) log("error in getting the shorty"); 
-                            let prototype_string_address: NativePointer = dex_file_begin.add(prototype_string_offset.add(1));
-                            log("prototype_string_address : " + prototype_string_address);
-                            
-                            log(" first character = " + Memory.readUtf8String(prototype_string_address, 1)); 
 
+                            let prototype_string_offset_old: NativePointer = Memory.readPointer(string_ids.add(shorty_idx_old.shl(2))); // or *4
+                            log("prototype_string offsett old " + prototype_string_offset_old);
+                            
+                            if(Memory.readPointer(dex_file_begin.add(prototype_string_offset_old)).equals(NULL)) log("****error in getting the shorty"); 
+                            let prototype_string_address_old: NativePointer = dex_file_begin.add(prototype_string_offset_old.add(1));
+                            log("prototype_string_address : " + prototype_string_address_old);
+                            
+                            let shorty =  Memory.readUtf8String(prototype_string_address_old);
+                            log(" shorty = " + shorty); 
 
                             
+                            // Obtaining the parameter list 
+                            let param_type_list: NativePointer = getProtoParameters(proto_id_old, dex_file_begin);
+                            log(" address of the param type list " + param_type_list + " size " + Memory.readS32(param_type_list));
+
+                            let size =  Memory.readS32(param_type_list);
+                            let param_type_list_elt = param_type_list.add(4);
+                            let type_ids =  Memory.readPointer(dexfile.add(40));
+                            
+                            for(let i = 0; i < size; i++) {
+                                let typeItem: NativePointer = param_type_list_elt.add(i*2);
+                                let type_index: number = Memory.readS16(typeItem);
+                                let type_id =  type_ids.add(type_index*4);
+                                let descriptor_idx: NativePointer = Memory.readPointer(type_id);
+                                let descriptor_string_offset =  Memory.readPointer(string_ids.add(descriptor_idx.shl(2)));
+                                let descriptor_string_address =  dex_file_begin.add(descriptor_string_offset.add(1));
+                                log("current type in string " + Memory.readUtf8String(descriptor_string_address));
+
+                            }
+                             /*if(!attachCurrentThread_attached){
+                                patchAttachCurrentThread(); attachCurrentThread_attached = 1;
+                            }*/
+                           
                             
 
 
@@ -557,6 +606,33 @@ function getDlopen(): DlopenFunc {
     }
 }
 
+/* struct ProtoId {
+    dex::StringIndex shorty_idx_;     // index into string_ids array for shorty descriptor
+    dex::TypeIndex return_type_idx_;  // index into type_ids array for return type
+    uint16_t pad_;                    // padding = 0
+    uint32_t parameters_off_;         // file offset to type_list for parameter types
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(ProtoId);
+  };
+                             const TypeList* GetProtoParameters(const ProtoId& proto_id) const {
+                                    if (proto_id.parameters_off_ == 0) {
+                                    return nullptr;
+                                    } else {
+                                    const uint8_t* addr = begin_ + proto_id.parameters_off_;
+                                    return reinterpret_cast<const TypeList*>(addr);
+                                    }
+                                }
+                            */
+function getProtoParameters(protoId: NativePointer, dex_file_begin: NativePointer): NativePointer{
+    let result: NativePointer = NULL;
+    let parameter_off_: number = Memory.readU32(protoId.add(8));
+    if(parameter_off_ != 0){
+        result = dex_file_begin.add(parameter_off_);
+    }
+    return result;
+}
+
 function makeDlopenWrapper(innerDlopenImpl: NativePointer, picValue: NativePointer): DlopenFunc {
     const trampoline = Memory.alloc(Process.pageSize);
     Memory.patchCode(trampoline, 16, code => {
@@ -615,7 +691,7 @@ function printAsmExploreCallsGetShorty(impl: NativePointer, nlines: number): voi
                    
                 }
                 break;
-        }
+        } 
         cur = insn.next;  
         counter++; 
         if(insn.mnemonic=="ret") break;
@@ -650,6 +726,18 @@ function printAsm(impl: NativePointer, nlines: number, force: boolean = false): 
     }
     log("----------------------------> end printing simple asm")
 }
+
+function patchAttachCurrentThread(): void{
+    Interceptor.attach(runtimeAttachCurrentThread, {
+        onEnter: function (args) {
+            log("---->invokef: called from: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t ---->"));
+        },
+        onLeave: function (retval) {
+        }
+      });
+}
+
+
 
 /*function printAsmExploreCallsGetShorty(impl: NativePointer, nlines: number): void{  
     let counter = 0;
@@ -764,9 +852,30 @@ class StdInstrumentationStackDeque {
 }
 
 /*
+
+// a bref easy to read code to descripbe how I obtained the shorty
+
+ log("############### My attempt ");            
+let proto_index_new: number = proto_index;
+log("proto index new: " + proto_index_new);
+
+let proto_id_new: NativePointer = proto_ids.add(proto_index_new * 12);
+log("proto_id address new " + proto_id_new);
+let shorty_idx_new: NativePointer =  Memory.readPointer(proto_id_new);
+log("shorty_idx_new " + shorty_idx_new);
+
+
+
+let prototype_string_offset_new: NativePointer = Memory.readPointer(string_ids.add(shorty_idx_new.shl(2)));
+log("prototype_string offsett new " + prototype_string_offset_new);
+
+if(Memory.readPointer(dex_file_begin.add(prototype_string_offset_new)).equals(NULL)) log("****error in getting the shorty"); 
+let prototype_string_address_new: NativePointer = dex_file_begin.add(prototype_string_offset_new.add(1));
+log("prototype_string_address : " + prototype_string_address_new);
+log(" first character = " + Memory.readUtf8String(prototype_string_address_new)); 
+                            
+
 function called when exploring the getShorty code from a method call. 
-
-
 
 function printAsmFirstJump(impl: NativePointer, ebx: NativePointer, nlines: number): void{  
     let counter = 0;
@@ -834,7 +943,7 @@ function printAsmExploreEverything(impl: NativePointer, nlines: number): void{
 }
 function printAsmExploreShorty(impl: NativePointer, nlines: number): void{  
     let counter = 0;
-    let cur: NativePointer = impl;
+    let cur: NativePointer = impl;GetMethodId
     let callsSeen = 0;
     let ebx: NativePointer = NULL;
     let innerFunction: NativePointer = NULL;
