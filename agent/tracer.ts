@@ -43,8 +43,8 @@ const artlib : any = dlopen("/system/lib/libart.so");
 const libcpp : any = dlopen("/system/lib/libc++.so");
 
 // HELPER CODE
-const helperPath = "/data/local/tmp/re.frida.server/libart-tracer-helper.so";
-const helper : any = dlopen(helperPath);
+//const helperPath = "/data/local/tmp/re.frida.server/libart-tracer-helper.so";
+//const helper : any = dlopen(helperPath);
 const method_Invoke: any = new NativeFunction(
     dlsym(artlib,"_ZN3art9ArtMethod6InvokeEPNS_6ThreadEPjjPNS_6JValueEPKc"),
     "void",
@@ -124,12 +124,12 @@ export function trace(callbacks: TraceCallbacks) {
         
         // HELPER CODE
         //log(`helper module: ${helper.toString()}`);
-        const getOffsetOfRuntimeInstrumentation: any = new NativeFunction(dlsym(helper, "ath_get_offset_of_runtime_instrumentation"), "uint", []);
+        /*const getOffsetOfRuntimeInstrumentation: any = new NativeFunction(dlsym(helper, "ath_get_offset_of_runtime_instrumentation"), "uint", []);
         log("we think instrumentation is at offset " + instrumentationOffset + ", helper thinks it's at " + getOffsetOfRuntimeInstrumentation());    
         
         const getOffsetOfClassIftable: any = new NativeFunction(dlsym(helper, "ath_get_offset_of_class_iftable_"), "uint", []);
         log("we think  types ids is at offset " + 16 + ", helper thinks it's at " + getOffsetOfClassIftable());    
-
+*/
 
         
         //const getMethoyTryCallShorty: any = new NativeFunction(dlsym(helper, "ath_get_method_try_call_shorty"), "pointer", ["pointer"]);
@@ -155,10 +155,7 @@ export function trace(callbacks: TraceCallbacks) {
         log("address of runtimeAttachCurrentThread in the helper" + runtimeAttachCurrentThread);
             //printAsmExploreCallsGetShorty(helperGetShorty,1000)
     
-      
-
-        
-        
+    
         const mirror_FindDeclaredDirectMethodByName: any = new NativeFunction(
         dlsym(artlib,"_ZN3art6mirror5Class30FindDeclaredDirectMethodByNameERKNS_11StringPieceENS_11PointerSizeE"),
         "pointer",
@@ -181,8 +178,6 @@ export function trace(callbacks: TraceCallbacks) {
         log("code : \n ");
         printAsm(instrumentationListener_MethodExited, 1000);
     
-
-
         const trace_GetMethodLine: any = new NativeFunction(
         dlsym(artlib,"_ZN3art5Trace13GetMethodLineEPNS_9ArtMethodE"),
         "pointer",
@@ -207,7 +202,7 @@ export function trace(callbacks: TraceCallbacks) {
 
         // END HELPER CODE
         const addListener: any = new NativeFunction(
-            dlsym(helper,"_ZN3art15instrumentation15Instrumentation11AddListenerEPNS0_23InstrumentationListenerEj"),
+            dlsym(artlib,"_ZN3art15instrumentation15Instrumentation11AddListenerEPNS0_23InstrumentationListenerEj"),
             "void",
             ["pointer","pointer","uint32"],
             {
@@ -233,19 +228,28 @@ export function trace(callbacks: TraceCallbacks) {
         enableDeoptimization(instrumentation);
         // HELPER CODE
         //log("preparing and call deoptimization");
-        const prepareDoptimization: any = new NativeFunction(
+        /*const prepareDoptimization: any = new NativeFunction(
         dlsym(helper, "ath_prepare_call_deoptimisation"), 
         "pointer", 
         ["pointer","pointer","pointer"]
         ,{
             exceptions: ExceptionsBehavior.Propagate
-        });
+        });*/
         const env = vm.getEnv();
         const threadHandle = getArtThreadFromEnv(env);
         //prepareDoptimization(instrumentation, Memory.allocUtf8String("frida"),threadHandle);
+
         deoptimizeEverything(instrumentation, Memory.allocUtf8String("frida"));
         addListener(instrumentation, listener, InstrumentationEvent.MethodEntered /* | InstrumentationEvent.MethodExited | InstrumentationEvent.FieldRead | InstrumentationEvent.FieldWritten*/);
-        //log("--------> after api: " + JSON.stringify(api));    
+        
+        //log("--------> after api: " + JSON.stringify(api)); 
+        //log("to see what happen when deoptimisation is not enabled : method are called eather directly from jni or called when already compiled");
+        //log("the overhead added by the deoptimisation is neglectable, the one to analyse is my code");
+        //log("to see what it can be possible to do with injection , let see the taint tracking");
+        //
+        
+        //patchInvoke(); 
+         
     }); 
 }
 
@@ -320,12 +324,13 @@ function makeMethodEntered(): NativePointer {
         rawClassName = Memory.readUtf8String(getDescriptor(declaring_class_, storage)) as string;   
         storage.dispose();
         const className = rawClassName.substring(1, rawClassName.length - 1).replace(/\//g, ".");
-        log("///////**end**///////"); ///this will be called after the callback attached by the interceptor
-        log("MethodEntered() thisObject=" + thisObject + " method=" + method + " descriptor=" + className + " dex_pc=" + dexPc + "methodName=" + stringMethodName);
+        log("thisObject=" + thisObject + ", method=" + method + ", descriptor=" + className + ", dex_pc=" + dexPc + ", methodName=" + stringMethodName);
+        //log("///////**end**///////"); ///this will be called after the callback attached by the interceptor
+      
         //just test the method
         //if(!method.isNull()) log("-/testing this method : " +  Memory.readU32(method.add(8)));
         // NOW GETTING THE ARGUMENTS
-        // there is one of the listener call graph when the method is called
+        // there is one of the possibles listener call graph when the method is called
         //art_quick_to_interpreter_bridge
         //              |
         //              v
@@ -349,11 +354,12 @@ function makeMethodEntered(): NativePointer {
 
     retainedHandles.push(callback);
     //we attach an interceptor to callback to have access to the stack of the current thread
+    //to optimize----------------
     Interceptor.attach(callback, {
         onEnter: function (args) {
             this.thread = args[1];
             this.method = args[3];
-            log("MethodEntered()  from the Interceptor ---method=" + this.method + " context=" + JSON.stringify(this.context));
+            //log("MethodEntered()  from the Interceptor ---method=" + this.method + " context=" + JSON.stringify(this.context));
             let current_sp = this.context.sp; 
             let current_pc = this.context.pc;
             let stack_offset_counter = 0;
@@ -365,7 +371,8 @@ function makeMethodEntered(): NativePointer {
             let thread: NativePointer = this.thread;
             let thread_pattern: any = thread.toMatchPattern();
             let matchList: MemoryScanMatch[] = Memory.scanSync(current_sp,2048, thread_pattern); 
-            log("match list length " + matchList.length);
+            let return_type_string: any;
+            //log("match list length " + matchList.length);
             var i:number = 0;
             do { 
                 let thread_stack_pointer: NativePointer = matchList[i].address;
@@ -373,122 +380,113 @@ function makeMethodEntered(): NativePointer {
                     let prospective_shadowFrame: NativePointer = Memory.readPointer(thread_stack_pointer.add(2*dword_size));
                     let prospective_method: NativePointer  = Memory.readPointer(prospective_shadowFrame.add(1*Process.pointerSize));
                     if(prospective_method.equals(this.method)){
-                        log(" //////////////**start**/////////////");
-                        //log("methodEntered: called from: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t"));
-                        log("Method: " + prospective_method);
-                        //log("called from: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t"));
-                        log("Shadow frame :" + prospective_shadowFrame + " thread position " + i);
+                        //log(" //////////////start/////////////");
+                        //log("Method: " + prospective_method);
+                        //log("Shadow frame :" + prospective_shadowFrame + " thread position " + i);
                         let prospective_shadow_frame_code_item = Memory.readPointer(thread_stack_pointer.add(dword_size)); 
-                        log("Shadow frame code_item = " + prospective_shadow_frame_code_item);
+                        //log("Shadow frame code_item = " + prospective_shadow_frame_code_item);
                         let number_registers = Memory.readU16(prospective_shadow_frame_code_item);
                         let number_inputs = Memory.readU16(prospective_shadow_frame_code_item.add(2));
-                        log("number of registers = " + number_registers + " number of inputs " + number_inputs);
+                        //log("number of registers = " + number_registers + " number of inputs " + number_inputs);
                         if(number_inputs <= number_registers){
                             let arg_offset: number = number_registers - number_inputs;
                             let shadow_frame_number_vregs: number = Memory.readU32(prospective_shadowFrame.add(24)); 
-                            log("number of vreg " + shadow_frame_number_vregs);
+                            //log("number of vreg " + shadow_frame_number_vregs);
                             let shadow_frame_vregs_: NativePointer = (prospective_shadowFrame.add(36));
                             let args: NativePointer = shadow_frame_vregs_.add(arg_offset * Process.pointerSize);
                             let args_size: number = shadow_frame_number_vregs - arg_offset; 
                             log("args pointer = " + args + " size = " + args_size);
                             let result_register = Memory.readPointer(thread_stack_pointer.add(3*dword_size)); //because the biggest size of Jvalue is 4+4 bytes =2 * dword
-                            log("Result register  = " + result_register);
+                            //log("Result register  = " + result_register);
                             let stay_in_interpreter = Memory.readInt(thread_stack_pointer.add(5*dword_size)); //because the biggest size of Jvalue is 4+4 bytes =2 * dword
-                            log("stay in interpreter = " + stay_in_interpreter);
+                            //log("stay in interpreter = " + stay_in_interpreter);
                             //TO GET THE SHORTY I NEED TO HAVE THE INTERFACE METHOD FIRST BY USING GetInterfaceMethodIfProxy()
                             //IN THE ART SOURCE CODE, THIS METHOD CALLS Runtime::Current()->GetClassLinker()->FindMethodForProxy(this); AND RETURN THE RESULT 
-                            // AND BECAUSE THE LATEST IS EXPOSED, I WILL START BY IMPLEMENTING IT, I DONT USE THE CACHE AS IN THE GetInterfaceMethodIfProxy()
-
-                            
+                            // AND BECAUSE THE LATEST IS EXPOSED, I WILL START BY IMPLEMENTING IT, I DONT USE THE CACHE AS IN THE GetInterfaceMethodIfProxy() 
                             let class_linker: NativePointer = Memory.readPointer(runtime.add(classLinker_offset));  
-                            log("classLinker : " + class_linker);
+                            //log("classLinker : " + class_linker);
                             let interfaceMethod = findMethodForProxy(class_linker, prospective_method);
-                            log("Interface Method obtained" + interfaceMethod);
+                            //log("Interface Method obtained" + interfaceMethod);
 
                             // NOW GETTING THE SHORTY FROM THE INTERFACE METHOD (method_index means index in the corresponding method_ids in the dex_file)(and the methood_id is the index in string_ids)
-                          
                             let declaringClass: NativePointer = Memory.readPointer(interfaceMethod);
-                            log ("Declaring class = " + declaringClass);
+                            //log ("Declaring class = " + declaringClass);
                             let dexCache: NativePointer = Memory.readPointer(declaringClass.add(16));
-                            log ("Dexcache = " + dexCache);
+                            //log ("Dexcache = " + dexCache);
                             let dexfile: NativePointer = Memory.readPointer(dexCache.add(16));
-                            log("dexFile" + dexfile);
+                            //log("dexFile" + dexfile);
                             let dex_method_index: number = Memory.readU16(interfaceMethod.add(8));
-                            log("dex_method_index" + dex_method_index);
+                            //log("dex_method_index" + dex_method_index);
                             let method_ids: NativePointer =  Memory.readPointer(dexfile.add(48));
-                            log("method_ids array" + method_ids);
-                            
+                            //log("method_ids array" + method_ids);
                             let proto_index: number = Memory.readU16(method_ids.add(dex_method_index*8 + 2));
-                            log("proto index " + proto_index);
-                           
-
+                            //log("proto index " + proto_index);
                             let proto_ids: NativePointer =  Memory.readPointer(dexfile.add(52));
-                            log("proto_ids array: " + proto_ids);
-                            let proto_index_old: number  =  ptr(proto_index).add(ptr(proto_index).shl(1)).toInt32();// - ----------------- to see deeply (okay just a compiler trick to multiply by 3)
-                            log("proto index old: " + proto_index_old);
-                           
-                            let proto_id_old: NativePointer = proto_ids.add(proto_index_old * 4);  /// can be used to obtain the return type
-                            log("proto_id address old " + proto_id_old);
-                            
+                            //log("proto_ids array: " + proto_ids);
+                            let proto_index_final: number  =  ptr(proto_index).add(ptr(proto_index).shl(1)).toInt32();// - ----------------- to see deeply (okay just a compiler trick to multiply by 3)
+                            //log("proto index old: " + proto_index_old);
+                            let proto_id_old: NativePointer = proto_ids.add(proto_index_final * 4);  /// can be used to obtain the return type
+                            //log("proto_id address  " + proto_id_old);
                             let shorty_idx_old: NativePointer =  Memory.readPointer(proto_id_old);
-                            log("shorty_idx  old " + shorty_idx_old);
-                           
+                            //log("shorty_idx  old " + shorty_idx_old);
                             let string_ids: NativePointer = Memory.readPointer(dexfile.add(36));
-                            log("string_ids array " + string_ids);
+                            //log("string_ids array " + string_ids);
                             let dex_file_begin: NativePointer = Memory.readPointer(dexfile.add(4));
-                            log("dex_file_begin " + dex_file_begin);
-
+                            //log("dex_file_begin " + dex_file_begin);
                             let prototype_string_offset_old: NativePointer = Memory.readPointer(string_ids.add(shorty_idx_old.shl(2))); // or *4
-                            log("prototype_string offsett old " + prototype_string_offset_old);
-                            
+                            //log("prototype_string offsett old " + prototype_string_offset_old);
                             if(Memory.readPointer(dex_file_begin.add(prototype_string_offset_old)).equals(NULL)) log("****error in getting the shorty"); 
                             let prototype_string_address_old: NativePointer = dex_file_begin.add(prototype_string_offset_old.add(1));
-                            log("prototype_string_address : " + prototype_string_address_old);
-                            
-                            let shorty =  Memory.readUtf8String(prototype_string_address_old);
-                            log(" shorty = " + shorty); 
+                            //log("prototype_string_address : " + prototype_string_address_old);
+                            let shorty: any =  Memory.readUtf8String(prototype_string_address_old);
+                            log(" shorty = " + shorty);
+                            let type_ids =  Memory.readPointer(dexfile.add(40));
+
+                            if(shorty.length == 1){
+                                //log("need only to obtain the return type");
+                                if(shorty != "L"){
+                                    return_type_string = getPrimitiveTypeAsString(shorty);
+                                }else{
+                                    let return_type_idx: number =  Memory.readU16(proto_id_old.add(4));
+                                    return_type_string = getStringByTypeIndex(type_ids, return_type_idx, string_ids, dex_file_begin);
+                                    log("Return type in string " + return_type_string);
+
+                                }   
+                                break;
+                            }
 
                             
                             // Obtaining the parameter list 
                             let param_type_list: NativePointer = getProtoParameters(proto_id_old, dex_file_begin);
-                            log(" address of the param type list " + param_type_list + " size " + Memory.readS32(param_type_list));
+                            //log(" address of the param type list " + param_type_list + " size " + Memory.readS32(param_type_list));
 
                             let size =  Memory.readS32(param_type_list);
                             let param_type_list_elt = param_type_list.add(4);
-                            let type_ids =  Memory.readPointer(dexfile.add(40));
+                            
                             
                             for(let i = 0; i < size; i++) {
                                 let typeItem: NativePointer = param_type_list_elt.add(i*2);
-                                let type_index: number = Memory.readS16(typeItem);
-                                let type_id =  type_ids.add(type_index*4);
-                                let descriptor_idx: NativePointer = Memory.readPointer(type_id);
-                                let descriptor_string_offset =  Memory.readPointer(string_ids.add(descriptor_idx.shl(2)));
-                                let descriptor_string_address =  dex_file_begin.add(descriptor_string_offset.add(1));
-                                log("current type in string " + Memory.readUtf8String(descriptor_string_address));
+                                let type_idx: number = Memory.readU16(typeItem);
+                                let descriptor_string = getStringByTypeIndex(type_ids, type_idx, string_ids, dex_file_begin);
+                                log("parameter" + i + "type in string " + descriptor_string);
 
                             }
-                             /*if(!attachCurrentThread_attached){
-                                patchAttachCurrentThread(); attachCurrentThread_attached = 1;
-                            }*/
-                           
-                            
-
-
-
-
+                            let return_type_idx: number =  Memory.readU16(proto_id_old.add(4));
+                            return_type_string = getStringByTypeIndex(type_ids, return_type_idx, string_ids, dex_file_begin);
+                            log("Return type in string " + return_type_string);
+                        }else{
+                            //log("the shadow frame does not have correct values " +  Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t ---->"));
                         }
                         break;
                     }else{
                         continue;
                     }
                 } catch (error) {
-                    //log("Error!");
+                    //log("Error!" + error);
                 }
-                //i++;
             } while(++i < matchList.length);
         },
         onLeave: function (retval) {
-          //log("Leaving the on enter callback");
         }
       });
 
@@ -498,7 +496,7 @@ function makeMethodEntered(): NativePointer {
 
 function makeMethodExited(): NativePointer {
     const callback = new NativeCallback((self: NativePointer, thread: NativePointer, thisObject: NativePointer, method: NativePointer, dexPc: number, returnValue: NativePointer): void => {
-        log("MethodExited() thisObject=" + thisObject + " method=" + method + " JValue=" + returnValue);
+        //log("MethodExited() thisObject=" + thisObject + " method=" + method + " JValue=" + returnValue);
     }, "void", ["pointer", "pointer", "pointer", "pointer", "uint32","pointer"]);
     retainedHandles.push(callback);
     return callback;
@@ -632,6 +630,41 @@ function getProtoParameters(protoId: NativePointer, dex_file_begin: NativePointe
     }
     return result;
 }
+function getStringByTypeIndex(type_ids: NativePointer, type_index: number, string_ids: NativePointer, dex_file_begin: NativePointer): string | null{
+    //log("-->in function getStringByTypeIndex");
+    let type_id =  type_ids.add(type_index*4);
+    let descriptor_idx: NativePointer = Memory.readPointer(type_id);
+    let descriptor_string_offset =  Memory.readPointer(string_ids.add(descriptor_idx.shl(2)));
+    let descriptor_string_address: NativePointer = dex_file_begin.add(descriptor_string_offset.add(1));
+    let type_: any = Memory.readUtf8String(descriptor_string_address);
+    if(type_.length == 1) return getPrimitiveTypeAsString(type_);
+    return type_;
+    //In the case we have one character, we need to make type readable 
+}
+function getPrimitiveTypeAsString(type: any): string|null{
+        switch (type) {
+            case 'B':
+            return "Byte";
+            case 'C':
+            return "Char";
+            case 'D':
+            return "Double";
+            case 'F':
+            return "Float";
+            case 'I':
+            return "Int";
+            case 'J':
+            return "Long";
+            case 'S':
+            return "Short";
+            case 'Z':
+            return "Boolean";
+            case 'V':
+            return "Void";
+            default:
+            return "NotRecognised";
+        } 
+}
 
 function makeDlopenWrapper(innerDlopenImpl: NativePointer, picValue: NativePointer): DlopenFunc {
     const trampoline = Memory.alloc(Process.pageSize);
@@ -696,17 +729,17 @@ function printAsmExploreCallsGetShorty(impl: NativePointer, nlines: number): voi
         counter++; 
         if(insn.mnemonic=="ret") break;
     }
-    log("------> start printing the inner function " + innerFunction);
+    //log("------> start printing the inner function " + innerFunction);
     printAsm(innerFunction, 1000);
-    log("------> end printing the inner function " + innerFunction);
+    //log("------> end printing the inner function " + innerFunction);
 
     let counter_ebx_function = 192;
     counter_ebx_function = counter_ebx_function + 4;
     while (counter_ebx_function <= 1220) {    
         //let dwordfromebx: NativePointer =  ebx.add(ptr(counter_ebx_function));
-        log("--------------> printing dword ptr [ebx + 0x" + counter_ebx_function.toString(16)  + " ]: ");
+        //log("--------------> printing dword ptr [ebx + 0x" + counter_ebx_function.toString(16)  + " ]: ");
         printAsm(Memory.readPointer(ebx.add(ptr(counter_ebx_function))), 1000);
-        log("--------------> end printing  dword ptr [ebx + 0x" + counter_ebx_function.toString(16)  + " ]: ");
+        //log("--------------> end printing  dword ptr [ebx + 0x" + counter_ebx_function.toString(16)  + " ]: ");
         counter_ebx_function = counter_ebx_function + 4;
     }
 
@@ -715,22 +748,63 @@ function printAsmExploreCallsGetShorty(impl: NativePointer, nlines: number): voi
 function printAsm(impl: NativePointer, nlines: number, force: boolean = false): void{  
     let counter = 0;
     let cur: NativePointer = impl;
-    log("---------------------------> printing the simple asm");
+    //log("---------------------------> printing the simple asm");
     while (counter < nlines) {    
         const insn = Instruction.parse(cur);
-        log(insn.address + "--> ......... " + insn.toString()); 
+        //log(insn.address + "--> ......... " + insn.toString()); 
         //counter++;
         cur = insn.next;  
         counter++; 
         if(insn.mnemonic=="ret") break;
     }
-    log("----------------------------> end printing simple asm")
+    //log("----------------------------> end printing simple asm")
+}
+
+
+function patchInvoke(): void{
+    Interceptor.attach(method_Invoke, {
+        onEnter: function (args) {
+            this.thread = args[1];
+            this.args = args[2];
+            
+            //this.method = args[3];
+            //log("invokef: called from: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t"));
+            //log("MethodEntered()  from the Interceptor ---method=" + this.method + " context=" + JSON.stringify(this.context));
+            //log("Loop from the stack pointer " +JSON.stringify(this.context));
+            let current_sp = this.context.sp; 
+            let dword_size = 4;
+            //void ArtMethod::Invoke(Thread* self, uint32_t* args, uint32_t args_size, JValue* result,const char* shorty)
+            //--->shorty = sp+dword_size*6;
+            //--->result = sp+dword_size*5;
+            //--->args_size = sp+dword_size*4;
+            //--->args = sp+dword_size*3;
+            //--->thread = sp+dword_size*2;
+            //--->method = sp+dword_size
+            let thread: NativePointer = this.thread;
+            this.method = Memory.readPointer(current_sp.add(dword_size));
+            let args_ = Memory.readPointer(current_sp.add(dword_size*3));
+            let methodNameStringObject = getNameAsString(this.method, thread); 
+            const stringMethodName = getNameFromStringObject(methodNameStringObject,thread);
+    
+            //let args_size = Memory.readU32(current_sp.add(dword_size*4));
+            //let current_args = Memory.readPointer(current_sp.add(dword_size*3));
+            let prospective_shorty = Memory.readPointer(current_sp.add(dword_size*6));
+            //log("---->shorty address = " + prospective_shorty + " thread  = " + this.thread + " args = " + this.args + " method = " + this.method + "-" + stringMethodName);
+            log("---->invokef: called from: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t ---->"));
+
+             //log(" first character = " + Memory.readUtf8String(prospective_shorty, 1)); 
+            //log("this.threadId = " + this.threadId);
+        },
+        onLeave: function (retval) {
+          //log("-----> Leaving the invoke callback thread = " + this.thread + "args = " + this.args + " method = " + this.method);
+        }
+      });
 }
 
 function patchAttachCurrentThread(): void{
     Interceptor.attach(runtimeAttachCurrentThread, {
         onEnter: function (args) {
-            log("---->invokef: called from: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t ---->"));
+            //log("---->invokef: called from: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t ---->"));
         },
         onLeave: function (retval) {
         }
@@ -773,7 +847,7 @@ class StdInstrumentationStackDeque {
     // refferring to the line  276 it is < 256 , so we have 4096/20 =~ 204
     __block_size : number = 204; 
     constructor(handle_: NativePointer) {
-        log(" we construct the stack object"); 
+        //log(" we construct the stack object"); 
         let __start_Offset  = 4*Process.pointerSize; 
         this.handle = handle_;
         this.__start_ = Memory.readUInt(handle_.add(__start_Offset));
@@ -786,7 +860,7 @@ class StdInstrumentationStackDeque {
         // it is in the third parameter, first element of the compressed pair  https://www.boost.org/doc/libs/1_47_0/boost/detail/compressed_pair.hpp  
         let sizeOffset = 5*Process.pointerSize;
         let result = Memory.readUInt(this.handle.add(sizeOffset));  
-        log ("- size of the instrumentation queue : " + result);
+        //log ("- size of the instrumentation queue : " + result);
         return result;
     }
 
@@ -795,7 +869,7 @@ class StdInstrumentationStackDeque {
         // https://github.com/google/libcxx/blob/master/include/__split_buffer line 47  
         let sizeOffset = 1*Process.pointerSize;
         let result = Memory.readPointer(this.handle.add(sizeOffset)); 
-        log ("- begin of the  map in instrumentation queue : " + result); 
+        //log ("- begin of the  map in instrumentation queue : " + result); 
         return result;
     }
 
@@ -804,21 +878,21 @@ class StdInstrumentationStackDeque {
         // https://github.com/google/libcxx/blob/master/include/__split_buffer line 48 
         let endOffset = 2*Process.pointerSize;
         let result = Memory.readPointer(this.handle.add(endOffset));  
-        log ("- end of the map of the instrumentation queue : " + result);
+        //log ("- end of the map of the instrumentation queue : " + result);
         return result;
     }
     __map_empty(): boolean {
         // it is compute from   the first parameter  __map_, witch is a split_buffer 
         // https://github.com/google/libcxx/blob/master/include/__split_buffer line 85
         let result =  this.__map_end().compare(this.__map_begin()) == 0;
-        log ("- map  of the instrumentation queue  is empty: " + result);
+        //log ("- map  of the instrumentation queue  is empty: " + result);
         return result;
     }
     
     refresh(){
         let __start_Offset  = 4*Process.pointerSize; 
         this.__start_ = Memory.readUInt(this.handle.add(__start_Offset));
-        log ("- start offset in the map of the instrumentation queue : " + this.__start_);
+        //log ("- start offset in the map of the instrumentation queue : " + this.__start_);
     }
     front(): NativePointer {
         // here we don't dereference the result, it is still a pointer 
