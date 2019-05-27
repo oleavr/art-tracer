@@ -37,6 +37,8 @@ try {
 }
 
 const runtime = api.artRuntime;
+let methodRegex: RegExp = /.*/;
+let classRegex: RegExp = /.*/;
 const dlopen = getDlopen();
 const dlsym = getDlsym();
 const artlib : any = dlopen("/system/lib/libart.so");
@@ -104,17 +106,32 @@ const runtimeAttachCurrentThread: any = new NativeFunction(
     {
         exceptions: ExceptionsBehavior.Propagate
     }); 
+const getDescriptor: any = new NativeFunction(
+    dlsym(artlib,"_ZN3art6mirror5Class13GetDescriptorEPNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEE") as NativePointer,
+    "pointer",
+    ["pointer","pointer"],
+    {
+        exceptions: ExceptionsBehavior.Propagate
+    });
 /*const runtimeAttachCurrentThread: any = new NativeFunction(
     dlsym(artlib,"_ZN3art7Runtime19AttachCurrentThreadEPKcbP8_jobjectb"),
     "boolean",
     ["pointer","boolean","pointer","boolean"],
     {
         exceptions: ExceptionsBehavior.Propagate
-    });*/
+    });
+*/
+const declaringClassOffset = 0;
+
+
+
+
 
 
     
-export function trace(callbacks: TraceCallbacks) {
+export function trace(callbacks: TraceCallbacks, methodRegex_: RegExp = /.*/, classRegex_: RegExp = /.*/) {
+    methodRegex = methodRegex_;
+    classRegex = classRegex_;
     Java.perform(() => {
         log("trace() starting up");
      
@@ -246,12 +263,11 @@ export function trace(callbacks: TraceCallbacks) {
         //log("to see what happen when deoptimisation is not enabled : method are called eather directly from jni or called when already compiled");
         //log("the overhead added by the deoptimisation is neglectable, the one to analyse is my code");
         //log("to see what it can be possible to do with injection , let see the taint tracking");
-        //
-        
         //patchInvoke(); 
          
     }); 
 }
+
 
 function makeListener(): NativePointer {
     const numVirtuals = 11;
@@ -304,30 +320,7 @@ function getNameFromStringObject(stringObject:NativePointer, thread: NativePoint
 
 function makeMethodEntered(): NativePointer {
     const callback = new NativeCallback((self: NativePointer, thread: NativePointer, thisObject: NativePointer, method: NativePointer, dexPc: number): void => {
-        let methodNameStringObject = getNameAsString(method, thread); 
-        const stringMethodName = getNameFromStringObject(methodNameStringObject,thread);
-        /// GETTING THE CLASS NAME : APPROACH BY METHOD CLASS 
-        let declaringClassOffset = 0;
-        const declaring_classHandle= method.add(declaringClassOffset);
-        const declaring_class_ = ptr(Memory.readU32(declaring_classHandle));
-        /// TRYING WITH THE DESCRIPTOR    const char* Class::GetDescriptor(std::string* storage)
-        const getDescriptor: any = new NativeFunction(
-            dlsym(artlib,"_ZN3art6mirror5Class13GetDescriptorEPNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEE") as NativePointer,
-            "pointer",
-            ["pointer","pointer"],
-            {
-                exceptions: ExceptionsBehavior.Propagate
-            });
-
-        let rawClassName: string;
-        const storage = new StdString();
-        rawClassName = Memory.readUtf8String(getDescriptor(declaring_class_, storage)) as string;   
-        storage.dispose();
-        const className = rawClassName.substring(1, rawClassName.length - 1).replace(/\//g, ".");
-        log("thisObject=" + thisObject + ", method=" + method + ", descriptor=" + className + ", dex_pc=" + dexPc + ", methodName=" + stringMethodName);
-        //log("///////**end**///////"); ///this will be called after the callback attached by the interceptor
-      
-        //just test the method
+       //just test the method
         //if(!method.isNull()) log("-/testing this method : " +  Memory.readU32(method.add(8)));
         // NOW GETTING THE ARGUMENTS
         // there is one of the possibles listener call graph when the method is called
@@ -359,6 +352,7 @@ function makeMethodEntered(): NativePointer {
         onEnter: function (args) {
             this.thread = args[1];
             this.method = args[3];
+            this.thisObject = args[2];
             //log("MethodEntered()  from the Interceptor ---method=" + this.method + " context=" + JSON.stringify(this.context));
             let current_sp = this.context.sp; 
             let current_pc = this.context.pc;
@@ -369,6 +363,8 @@ function makeMethodEntered(): NativePointer {
             let code_item_offset = 16;
             let classLinker_offset = 284;
             let thread: NativePointer = this.thread;
+            let method: NativePointer = this.method;
+            let thisObject: NativePointer = this.thisObject;
             let thread_pattern: any = thread.toMatchPattern();
             let matchList: MemoryScanMatch[] = Memory.scanSync(current_sp,2048, thread_pattern); 
             let return_type_string: any;
@@ -380,15 +376,75 @@ function makeMethodEntered(): NativePointer {
                     let prospective_shadowFrame: NativePointer = Memory.readPointer(thread_stack_pointer.add(2*dword_size));
                     let prospective_method: NativePointer  = Memory.readPointer(prospective_shadowFrame.add(1*Process.pointerSize));
                     if(prospective_method.equals(this.method)){
-                        //log(" //////////////start/////////////");
-                        //log("Method: " + prospective_method);
-                        //log("Shadow frame :" + prospective_shadowFrame + " thread position " + i);
-                        let prospective_shadow_frame_code_item = Memory.readPointer(thread_stack_pointer.add(dword_size)); 
-                        //log("Shadow frame code_item = " + prospective_shadow_frame_code_item);
-                        let number_registers = Memory.readU16(prospective_shadow_frame_code_item);
-                        let number_inputs = Memory.readU16(prospective_shadow_frame_code_item.add(2));
-                        //log("number of registers = " + number_registers + " number of inputs " + number_inputs);
-                        if(number_inputs <= number_registers){
+                       
+                            let prospective_shadow_frame_code_item = Memory.readPointer(thread_stack_pointer.add(dword_size)); 
+                            //log("Shadow frame code_item = " + prospective_shadow_frame_code_item);
+                            let number_registers = Memory.readU16(prospective_shadow_frame_code_item);
+                            let number_inputs = Memory.readU16(prospective_shadow_frame_code_item.add(2));
+                            //log("number of registers = " + number_registers + " number of inputs " + number_inputs);
+                            if(number_inputs <= number_registers){
+                                //log(" //////////////start/////////////");
+                            //log("Method: " + prospective_method);
+                            //log("Shadow frame :" + prospective_shadowFrame + " thread position " + i);
+
+                            let methodNameStringObject = getNameAsString(method, thread); 
+                            const stringMethodName = getNameFromStringObject(methodNameStringObject,thread);
+
+                            /// user condition on the method Name
+                            log("testing method name" + stringMethodName + "regex " + methodRegex); 
+                            if(!methodRegex.test(stringMethodName as string)){
+                                log("method name does not match");
+                                return;  
+                            }
+                          
+                            /// GETTING THE CLASS NAME : APPROACH BY METHOD CLASS 
+                           
+                            const declaring_classHandle= method.add(declaringClassOffset);
+                            const declaring_class_ = ptr(Memory.readU32(declaring_classHandle));
+                            /// TRYING WITH THE DESCRIPTOR    const char* Class::GetDescriptor(std::string* storage)
+
+                            let rawClassName: string;
+                            const storage = new StdString();
+                            rawClassName = Memory.readUtf8String(getDescriptor(declaring_class_, storage)) as string;   
+                            storage.dispose();
+                            const className = rawClassName.substring(1, rawClassName.length - 1).replace(/\//g, ".");
+                            log("testing class name");
+                            if(!classRegex.test(className)){
+                                log("class name does not match");
+                                return;
+                            }
+
+                            /// GETTING THE CALLER NAME AND HIS ClASS NAME TO TEST..
+                            let link_shadow_frame: NativePointer = Memory.readPointer(prospective_shadowFrame);
+                            if(link_shadow_frame.isNull){
+                                log("caller name is not avalaible");
+                            }else{
+                                log("caller shadow frame address " + link_shadow_frame);
+                                let link_method: NativePointer = Memory.readPointer(link_shadow_frame.add(1*Process.pointerSize));
+                                let linkMethodNameStringObject = getNameAsString(link_method, thread); 
+                                const stringLinkMethodName = getNameFromStringObject(linkMethodNameStringObject,thread);
+                                log("caller Method : " + stringLinkMethodName);
+
+                                let rawLinkClassName: string;
+                                const storage = new StdString();
+                                const link_declaring_classHandle= link_method.add(declaringClassOffset);
+                                const link_declaring_class_ = ptr(Memory.readU32(link_declaring_classHandle));
+                                rawLinkClassName = Memory.readUtf8String(getDescriptor(link_declaring_class_, storage)) as string;   
+                                storage.dispose();
+                                const link_className = rawLinkClassName.substring(1, rawLinkClassName.length - 1).replace(/\//g, ".");
+                                log("caller class Name" + link_className);
+                            }
+
+
+                          
+
+                            // user condition on the class name
+
+
+                            log("thisObject=" + thisObject + ", method=" + method + ", descriptor=" + className + ", methodName=" + stringMethodName);
+
+
+
                             let arg_offset: number = number_registers - number_inputs;
                             let shadow_frame_number_vregs: number = Memory.readU32(prospective_shadowFrame.add(24)); 
                             //log("number of vreg " + shadow_frame_number_vregs);
@@ -424,7 +480,7 @@ function makeMethodEntered(): NativePointer {
                             let proto_ids: NativePointer =  Memory.readPointer(dexfile.add(52));
                             //log("proto_ids array: " + proto_ids);
                             let proto_index_final: number  =  ptr(proto_index).add(ptr(proto_index).shl(1)).toInt32();// - ----------------- to see deeply (okay just a compiler trick to multiply by 3)
-                            //log("proto index old: " + proto_index_old);
+                            //log("proto index old:  caller " + proto_index_old);
                             let proto_id_old: NativePointer = proto_ids.add(proto_index_final * 4);  /// can be used to obtain the return type
                             //log("proto_id address  " + proto_id_old);
                             let shorty_idx_old: NativePointer =  Memory.readPointer(proto_id_old);
@@ -675,13 +731,13 @@ function makeDlopenWrapper(innerDlopenImpl: NativePointer, picValue: NativePoint
         cw.flush();
     });
 
-    const innerDlopen: any = new NativeFunction(trampoline, "pointer", ["pointer", "int", "pointer"]);
+    const innerModifiedDlopen: any = new NativeFunction(trampoline, "pointer", ["pointer", "int", "pointer"]);
     const addressInsideLibc = Module.findExportByName("libc.so", "read");
     
     //innerDlopen.trampoline = trampoline;
 
     return function (path: string): NativePointer {
-        const handle = innerDlopen(Memory.allocUtf8String(path), 3, addressInsideLibc);
+        const handle = innerModifiedDlopen(Memory.allocUtf8String(path), 3, addressInsideLibc);
         if (handle.isNull()) {
             const dlerror: any = new NativeFunction(Module.findExportByName(null, "dlerror") as NativePointer, "pointer", []);
             throw new Error("Unable to load helper: " + Memory.readUtf8String(dlerror()));

@@ -10,6 +10,7 @@ setTimeout(() => {
             onLeave(methodName) {
             }
         });    
+        //},/.*/,/java.lang/); 
     } catch (error) {
         log("Oups --------> " + error.stack);
     }    
