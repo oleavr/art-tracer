@@ -9,7 +9,8 @@ outside the art-tracer repo:
 
 Then in here:
 
-    export FRIDA=/path/to/frida/checkout
+    (not necessary??) export FRIDA=/path/to/frida/checkout
+    export NDK_TOOLCHAIN=/path/to/toolchain
     make build
 
 ## Deploy

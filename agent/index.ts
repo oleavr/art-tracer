@@ -14,4 +14,4 @@ setTimeout(() => {
     } catch (error) {
         log("Oups --------> " + error.stack);
     }    
-}, 2000);
+}, 1000);

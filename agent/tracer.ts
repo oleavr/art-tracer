@@ -2,15 +2,17 @@ import * as Java from "frida-java";
 import { getApi } from "frida-java/lib/android";
 import { getArtThreadFromEnv } from "frida-java/lib/android";
 import { log } from "./logger";
+import { test_client } from "./client_logger";
 import  VM  from "frida-java/lib/vm"
 import { prototype } from "stream";
 import { print } from "util";
+import { StdInstrumentationStackDeque, StdString } from "./tools";
 const api = getApi();
 
 
 export interface TraceCallbacks {
-    onEnter(methodName: string): void;
-    onLeave(methodName: string): void;
+    onEnter(methodName: string | null): void;
+    onLeave(methodName: string | null): void;
 }
 
 enum InstrumentationEvent {
@@ -29,6 +31,8 @@ const retainedHandles: any[] = [];  // to keep calbacks alive
 
 let attachCurrentThread_attached = 0;
 
+let userTraceCallbacks: TraceCallbacks;
+
 let listener: NativePointer;
 try {
     listener = makeListener();
@@ -43,7 +47,7 @@ const dlopen = getDlopen();
 const dlsym = getDlsym();
 const artlib : any = dlopen("/system/lib/libart.so");
 const libcpp : any = dlopen("/system/lib/libc++.so");
-
+const libc : any = dlopen("/system/lib/libc.so");
 // HELPER CODE
 //const helperPath = "/data/local/tmp/re.frida.server/libart-tracer-helper.so";
 //const helper : any = dlopen(helperPath);
@@ -113,14 +117,29 @@ const getDescriptor: any = new NativeFunction(
     {
         exceptions: ExceptionsBehavior.Propagate
     });
-/*const runtimeAttachCurrentThread: any = new NativeFunction(
-    dlsym(artlib,"_ZN3art7Runtime19AttachCurrentThreadEPKcbP8_jobjectb"),
-    "boolean",
-    ["pointer","boolean","pointer","boolean"],
+const fopen: any = new NativeFunction(
+    dlsym(libc,"fopen"),
+    "pointer",
+    ["pointer","pointer"],
     {
         exceptions: ExceptionsBehavior.Propagate
     });
-*/
+const fprintf: any = new NativeFunction(
+    dlsym(libc,"fprintf"),
+    "int",
+    ["pointer","pointer",'...'],
+    {
+        exceptions: ExceptionsBehavior.Propagate
+    });
+const fclose: any = new NativeFunction(
+    dlsym(libc,"fclose"),
+    "int",
+    ["pointer"],
+    {
+        exceptions: ExceptionsBehavior.Propagate
+    });
+            
+
 const declaringClassOffset = 0;
 
 
@@ -129,83 +148,48 @@ const declaringClassOffset = 0;
 
 
     
-export function trace(callbacks: TraceCallbacks, methodRegex_: RegExp = /.*/, classRegex_: RegExp = /.*/) {
+export function trace(userTraceCallbacks_: TraceCallbacks, methodRegex_: RegExp = /.*/, classRegex_: RegExp = /.*/) {
     methodRegex = methodRegex_;
     classRegex = classRegex_;
+    userTraceCallbacks = userTraceCallbacks_;
     Java.perform(() => {
-        log("trace() starting up");
+        log("trace() starting up 1");
+        test_client();
+
+/*
+to implement to log 
+#include "stdio.h"
+void WriteLogFile(const char* szString)
+{
+  #IFDEF DEBUG
+
+  FILE* pFile = fopen("logFile.txt", "a");
+  fprintf(pFile, "%s\n",szString);
+  fclose(pFile);
+
+  #ENDIF
+
+}*/
+
+
+
+
+
+
+
+
+
+
+
+
+
+        log("trace() starting up 2");
      
         const vm = new VM(api);
         const instrumentationOffset = 464;
         const instrumentation = runtime.add(instrumentationOffset);
         
-        // HELPER CODE
-        //log(`helper module: ${helper.toString()}`);
-        /*const getOffsetOfRuntimeInstrumentation: any = new NativeFunction(dlsym(helper, "ath_get_offset_of_runtime_instrumentation"), "uint", []);
-        log("we think instrumentation is at offset " + instrumentationOffset + ", helper thinks it's at " + getOffsetOfRuntimeInstrumentation());    
-        
-        const getOffsetOfClassIftable: any = new NativeFunction(dlsym(helper, "ath_get_offset_of_class_iftable_"), "uint", []);
-        log("we think  types ids is at offset " + 16 + ", helper thinks it's at " + getOffsetOfClassIftable());    
-*/
-
-        
-        //const getMethoyTryCallShorty: any = new NativeFunction(dlsym(helper, "ath_get_method_try_call_shorty"), "pointer", ["pointer"]);
-        //log("///////looking inside the getShorty() source code");
-        //printAsmExploreShorty(getMethoyTryCallShorty, 1000);
-        //const getMethoyTryCallGetInterfaceIfProxy: any = new NativeFunction(dlsym(helper, "ath_get_method_try_call_get_interface_if_proxy"), "pointer", ["pointer"]);
-        //log("helper think ath_get_method_try_call_shorty is  " + getMethoyTryCallShorty());
-        //log("getInterfaceMethodIfProxy()");
-        //printAsmExploreShorty(getMethoyTryCallGetInterfaceIfProxy, 1000);
-        //const getMethodShorty: any = new NativeFunction(dlsym(helper, "ath_get_method_shorty_"), "pointer", ["pointer"]);
-        /*log("method Shorty code ");
-        printAsm(getMethodShorty, 1000);*/
-        /*const helperGetShorty: any = new NativeFunction(
-        dlsym(helper,"_ZN3art9ArtMethod9GetShortyEv"),
-        "pointer",
-        [],
-        {
-            exceptions: ExceptionsBehavior.Propagate
-        });
-        log("address of getShorty in the helper" + helperGetShorty);*/
-        //printAsmExploreCallsGetShorty(helperGetShorty,1000)
-       
-        log("address of runtimeAttachCurrentThread in the helper" + runtimeAttachCurrentThread);
-            //printAsmExploreCallsGetShorty(helperGetShorty,1000)
-    
-    
-        const mirror_FindDeclaredDirectMethodByName: any = new NativeFunction(
-        dlsym(artlib,"_ZN3art6mirror5Class30FindDeclaredDirectMethodByNameERKNS_11StringPieceENS_11PointerSizeE"),
-        "pointer",
-        ["pointer","pointer"],
-        {
-            exceptions: ExceptionsBehavior.Propagate
-        });
-        log("printing the address of mirror_FindDeclaredDirectMethodByName " + mirror_FindDeclaredDirectMethodByName);
-        log("code : \n ");
-        printAsm(mirror_FindDeclaredDirectMethodByName, 1000);
-
-        /*const instrumentationListener_MethodExited: any = new NativeFunction(
-        dlsym(artlib,"_ZN3art15instrumentation23InstrumentationListener12MethodExitedEPNS_6ThreadENS_6HandleINS_6mirror6ObjectEEEPNS_9ArtMethodEjS7_"),
-        "void",
-        ["pointer","pointer","pointer","uint32","pointer"],
-        {
-            exceptions: ExceptionsBehavior.Propagate
-        });
-        log("printing the address of instrumentationListener_MethodExited " + instrumentationListener_MethodExited);
-        log("code : \n ");
-        printAsm(instrumentationListener_MethodExited, 1000);
-    
-        const trace_GetMethodLine: any = new NativeFunction(
-        dlsym(artlib,"_ZN3art5Trace13GetMethodLineEPNS_9ArtMethodE"),
-        "pointer",
-        ["pointer"],
-        {
-            exceptions: ExceptionsBehavior.Propagate
-        });
-        log("printing the address of Trace::GetMethodLine " + trace_GetMethodLine);
-        log("code : \n ");
-        printAsm(trace_GetMethodLine, 1000);*/
-
+        // HELPER CODE-- Just for me, the developper :) 
         const gdb_OutputMethodReturnValue: any = new NativeFunction(
         dlsym(artlib,"_ZN3art3Dbg23OutputMethodReturnValueEyPKNS_6JValueEPNS_4JDWP9ExpandBufE"),
         "void",
@@ -243,22 +227,17 @@ export function trace(callbacks: TraceCallbacks, methodRegex_: RegExp = /.*/, cl
             });
         //log("address Of deoptimizeEverything " + deoptimizeEverything);
         enableDeoptimization(instrumentation);
-        // HELPER CODE
-        //log("preparing and call deoptimization");
-        /*const prepareDoptimization: any = new NativeFunction(
-        dlsym(helper, "ath_prepare_call_deoptimisation"), 
-        "pointer", 
-        ["pointer","pointer","pointer"]
-        ,{
-            exceptions: ExceptionsBehavior.Propagate
-        });*/
         const env = vm.getEnv();
         const threadHandle = getArtThreadFromEnv(env);
         //prepareDoptimization(instrumentation, Memory.allocUtf8String("frida"),threadHandle);
 
-        deoptimizeEverything(instrumentation, Memory.allocUtf8String("frida"));
-        addListener(instrumentation, listener, InstrumentationEvent.MethodEntered /* | InstrumentationEvent.MethodExited | InstrumentationEvent.FieldRead | InstrumentationEvent.FieldWritten*/);
+        if(Process.arch == "ia32") log("----------////////////// Archictecture  "  +   Process.arch);
+     
+        //deoptimizeEverything(instrumentation, Memory.allocUtf8String("frida"));
+        //addListener(instrumentation, listener, InstrumentationEvent.MethodEntered /* | InstrumentationEvent.MethodExited | InstrumentationEvent.FieldRead | InstrumentationEvent.FieldWritten*/);
         
+
+
         //log("--------> after api: " + JSON.stringify(api)); 
         //log("to see what happen when deoptimisation is not enabled : method are called eather directly from jni or called when already compiled");
         //log("the overhead added by the deoptimisation is neglectable, the one to analyse is my code");
@@ -350,6 +329,10 @@ function makeMethodEntered(): NativePointer {
     //to optimize----------------
     Interceptor.attach(callback, {
         onEnter: function (args) {
+            var start = new Date().getTime();
+
+
+
             this.thread = args[1];
             this.method = args[3];
             this.thisObject = args[2];
@@ -365,83 +348,206 @@ function makeMethodEntered(): NativePointer {
             let thread: NativePointer = this.thread;
             let method: NativePointer = this.method;
             let thisObject: NativePointer = this.thisObject;
+            
+            // GENERAL INFORMATIONS WE CAN OBTAIN IN ALL CASES, FOR NORMAL AND COMPILED METHODS  
+            let methodNameStringObject = getNameAsString(method, thread); 
+            const stringMethodName = getNameFromStringObject(methodNameStringObject,thread);
+
+            /// user condition on the method Name
+            log("testing method name" + stringMethodName + "regex " + methodRegex); 
+            if(!methodRegex.test(stringMethodName as string)){
+                log("method name does not match");
+                return;  
+            }
+          
+            /// GETTING THE CLASS NAME : APPROACH BY METHOD CLASS 
+           
+            const declaring_classHandle= method.add(declaringClassOffset);
+            const declaring_class_ = ptr(Memory.readU32(declaring_classHandle));
+            /// TRYING WITH THE DESCRIPTOR    const char* Class::GetDescriptor(std::string* storage)
+
+            let rawClassName: string;
+            const storage = new StdString();
+            rawClassName = Memory.readUtf8String(getDescriptor(declaring_class_, storage)) as string;   
+            storage.dispose();
+            const className = rawClassName.substring(1, rawClassName.length - 1).replace(/\//g, ".");
+            log("testing class name");
+            if(!classRegex.test(className)){
+                log("class name does not match");
+                return;
+            }
+
+            log("thisObject=" + thisObject + ", \n method=" + method + ",\n descriptor=" + className + ",\n methodName=" + stringMethodName);
+
+            // NOW LOOKING FOR THE SHORTY AND FOR THE ARGUMENTS
+
+            //GETTING THE SHORTY
+            let return_type_string: any;
+
+    //TO GET THE SHORTY I NEED TO HAVE THE INTERFACE METHOD FIRST BY USING GetInterfaceMethodIfProxy()
+            //IN THE ART SOURCE CODE, THIS METHOD CALLS Runtime::Current()->GetClassLinker()->FindMethodForProxy(this); AND RETURN THE RESULT 
+            // AND BECAUSE THE LATEST IS EXPOSED, I WILL START BY IMPLEMENTING IT, I DONT USE THE CACHE AS IN THE GetInterfaceMethodIfProxy() 
+            let class_linker: NativePointer = Memory.readPointer(runtime.add(classLinker_offset));  
+            //log("classLinker : " + class_linker);
+            let interfaceMethod = findMethodForProxy(class_linker, method);
+            //log("Interface Method obtained" + interfaceMethod);
+
+            // NOW GETTING THE SHORTY FROM THE INTERFACE METHOD (method_index means index in the corresponding method_ids in the dex_file)(and the methood_id is the index in string_ids)
+            let declaringClass: NativePointer = Memory.readPointer(interfaceMethod);
+            //log ("Declaring class = " + declaringClass);
+            let dexCache: NativePointer = Memory.readPointer(declaringClass.add(16));
+            //log ("Dexcache = " + dexCache);
+            let dexfile: NativePointer = Memory.readPointer(dexCache.add(16));
+            //log("dexFile" + dexfile);
+            let dex_method_index: number = Memory.readU16(interfaceMethod.add(8));
+            //log("dex_method_index" + dex_method_index);
+            let method_ids: NativePointer =  Memory.readPointer(dexfile.add(48));
+            //log("method_ids array" + method_ids);
+            let proto_index: number = Memory.readU16(method_ids.add(dex_method_index*8 + 2));
+            //log("proto index " + proto_index);
+            let proto_ids: NativePointer =  Memory.readPointer(dexfile.add(52));
+            //log("proto_ids array: " + proto_ids);
+            let proto_index_final: number  =  ptr(proto_index).add(ptr(proto_index).shl(1)).toInt32();// - ----------------- to see deeply (okay just a compiler trick to multiply by 3)
+            //log("proto index old:  caller " + proto_index_old);
+            let proto_id_old: NativePointer = proto_ids.add(proto_index_final * 4);  /// can be used to obtain the return type
+            //log("proto_id address  " + proto_id_old);
+            let shorty_idx_old: NativePointer =  Memory.readPointer(proto_id_old);
+            //log("shorty_idx  old " + shorty_idx_old);
+            let string_ids: NativePointer = Memory.readPointer(dexfile.add(36));
+            //log("string_ids array " + string_ids);
+            let dex_file_begin: NativePointer = Memory.readPointer(dexfile.add(4));
+            //log("dex_file_begin " + dex_file_begin);
+            let prototype_string_offset_old: NativePointer = Memory.readPointer(string_ids.add(shorty_idx_old.shl(2))); // or *4
+            //log("prototype_string offsett old " + prototype_string_offset_old);
+            if(Memory.readPointer(dex_file_begin.add(prototype_string_offset_old)).equals(NULL)) log("****error in getting the shorty"); 
+            let prototype_string_address_old: NativePointer = dex_file_begin.add(prototype_string_offset_old.add(1));
+            //log("prototype_string_address : " + prototype_string_address_old);
+            let shorty: any =  Memory.readUtf8String(prototype_string_address_old);
+            log(" shorty = " + shorty);
+            let type_ids =  Memory.readPointer(dexfile.add(40));
+
+            if(shorty.length == 1){
+                //log("need only to obtain the return type");
+                if(shorty != "L"){
+                    return_type_string = getPrimitiveTypeAsString(shorty);
+                }else{
+                    let return_type_idx: number =  Memory.readU16(proto_id_old.add(4));
+                    return_type_string = getStringByTypeIndex(type_ids, return_type_idx, string_ids, dex_file_begin);
+                    log("Return type in string " + return_type_string);
+
+                }   
+                //break;
+            }else{
+                // Obtaining the parameter list 
+                let param_type_list: NativePointer = getProtoParameters(proto_id_old, dex_file_begin);
+                //log(" address of the param type list " + param_type_list + " size " + Memory.readS32(param_type_list));
+
+                let size =  Memory.readS32(param_type_list);
+                let param_type_list_elt = param_type_list.add(4);
+                
+                
+                for(let i = 0; i < size; i++) {
+                    let typeItem: NativePointer = param_type_list_elt.add(i*2);
+                    let type_idx: number = Memory.readU16(typeItem);
+                    let descriptor_string = getStringByTypeIndex(type_ids, type_idx, string_ids, dex_file_begin);
+                    log("parameter" + i + "type in string " + descriptor_string);
+
+                }
+                let return_type_idx: number =  Memory.readU16(proto_id_old.add(4));
+                return_type_string = getStringByTypeIndex(type_ids, return_type_idx, string_ids, dex_file_begin);
+                log("Return type in string " + return_type_string);
+
+
+            }  
+          
+              
             let thread_pattern: any = thread.toMatchPattern();
             let matchList: MemoryScanMatch[] = Memory.scanSync(current_sp,2048, thread_pattern); 
-            let return_type_string: any;
-            //log("match list length " + matchList.length);
             var i:number = 0;
+            let code_compiled: Boolean = false; 
+           
+            // IN THE CASE ART IS EXECUTING NON COMPILED METHOD (IN THE PERFORM_CALL->INTERPRETER_TO_INTERPRETER
+            // OR FROM THE JNI CALL TO_INTERPRETER_STUB->INTERPRETER_ENTRY_POINT) THE CODE_ITEM CONTAINING THE 
+            // THE ARGUMENTS OFFSET IN THE SHADOW FRAME IS ON THE 
+            // STACK AND WE CAN GET THE SHORTY FROM THE DEXCACHE OF THE METHOD
+             
+            //IN THE OTHER CASE (COMPILED CODE, NOT INTENDED TO BE DEBUGGED EVEN BY THE ART ITSELF) WE NEED TO 
+            // FIND ANOTHER WAY KNOWING THAT THE PATH WILL BE 
+            //PERFORM_CALL->TO_COMPILE_CODE->INVOKE->INSTRUMENTATION_STUB->..->PUSH_INSTRUMENTATION_STACK_FRAME->LISTENER
+            //( NOT THE PATH   INVOKE->TO_COMPILE_CODE BECAUSE THIS ONE IS USED WHEN DEOPTIMIZE IS NOT ACTIVATED AND AN 
+            // ALREADY COMPILED CODE SHOULD BE EXECUTED.)
+
+            // FIRSTLY I WILL TEST IF IN THIS CASE I CAN GET THE SP IN STACK WHEN ART_INST_METHOD_ENTRY_FROM_CODE IS CALLED
+            // TO OBTAIN ARGUMENTS
+            // SECONDLY I WILL TEST IF I CAN ALSO OBTAIN THE SHORTY AS IN THE CASE ABOVE. (TO TEST FIRST)
+            // TO LOCATE THIS SPECIAL CASE, I LOOK AT THE GENERAL VALUE OF THE I COUNTER AND STOP THE WHILE. ACCORDING TO IT
+            //AFTER I WILL LOOK AT THE CALLER. 
             do { 
                 let thread_stack_pointer: NativePointer = matchList[i].address;
                 try{
+                    if(i > 13){ /*IN THIS CASE, WE ARE SURE THAT WE ARE NO LONGER IN THE INTERPRETER CASE AS EXPLAINED ABOVE, BUT WE ARE 
+                                  PROBABLY IN THE CASE WHERE THE METHOD IS COMPILED, SO WE BREAK AND RESTART THE LOOP TO IDENTIFY ARGUMENTS POINTERS 
+                                  ON ANOTHER WAY AND POSSIBLY THE CALLER 
+                                 following this rules in the quick_entry_point_x86.S
+                              */
+                        code_compiled = true; 
+                        log("Probably we are with a compiled source code");
+                        break;
+                    }
+
                     let prospective_shadowFrame: NativePointer = Memory.readPointer(thread_stack_pointer.add(2*dword_size));
                     let prospective_method: NativePointer  = Memory.readPointer(prospective_shadowFrame.add(1*Process.pointerSize));
                     if(prospective_method.equals(this.method)){
-                       
-                            let prospective_shadow_frame_code_item = Memory.readPointer(thread_stack_pointer.add(dword_size)); 
-                            //log("Shadow frame code_item = " + prospective_shadow_frame_code_item);
-                            let number_registers = Memory.readU16(prospective_shadow_frame_code_item);
-                            let number_inputs = Memory.readU16(prospective_shadow_frame_code_item.add(2));
-                            //log("number of registers = " + number_registers + " number of inputs " + number_inputs);
-                            if(number_inputs <= number_registers){
-                                //log(" //////////////start/////////////");
+                        let prospective_shadow_frame_code_item = Memory.readPointer(thread_stack_pointer.add(dword_size)); 
+                        //log("Shadow frame code_item = " + prospective_shadow_frame_code_item);
+                        let number_registers = Memory.readU16(prospective_shadow_frame_code_item);
+                        let number_inputs = Memory.readU16(prospective_shadow_frame_code_item.add(2));
+                        //log("number of registers = " + number_registers + " number of inputs " + number_inputs);
+                        if(number_inputs <= number_registers){
+                            //log(" //////////////start/////////////");
                             //log("Method: " + prospective_method);
-                            //log("Shadow frame :" + prospective_shadowFrame + " thread position " + i);
-
-                            let methodNameStringObject = getNameAsString(method, thread); 
-                            const stringMethodName = getNameFromStringObject(methodNameStringObject,thread);
-
-                            /// user condition on the method Name
-                            log("testing method name" + stringMethodName + "regex " + methodRegex); 
-                            if(!methodRegex.test(stringMethodName as string)){
-                                log("method name does not match");
-                                return;  
-                            }
-                          
-                            /// GETTING THE CLASS NAME : APPROACH BY METHOD CLASS 
-                           
-                            const declaring_classHandle= method.add(declaringClassOffset);
-                            const declaring_class_ = ptr(Memory.readU32(declaring_classHandle));
-                            /// TRYING WITH THE DESCRIPTOR    const char* Class::GetDescriptor(std::string* storage)
-
-                            let rawClassName: string;
-                            const storage = new StdString();
-                            rawClassName = Memory.readUtf8String(getDescriptor(declaring_class_, storage)) as string;   
-                            storage.dispose();
-                            const className = rawClassName.substring(1, rawClassName.length - 1).replace(/\//g, ".");
-                            log("testing class name");
-                            if(!classRegex.test(className)){
-                                log("class name does not match");
-                                return;
-                            }
+                            log("Shadow frame :" + prospective_shadowFrame + " thread position " + i);
+                            log("thread : " + thread);
 
                             /// GETTING THE CALLER NAME AND HIS ClASS NAME TO TEST..
-                            let link_shadow_frame: NativePointer = Memory.readPointer(prospective_shadowFrame);
-                            if(link_shadow_frame.isNull){
-                                log("caller name is not avalaible");
-                            }else{
-                                log("caller shadow frame address " + link_shadow_frame);
-                                let link_method: NativePointer = Memory.readPointer(link_shadow_frame.add(1*Process.pointerSize));
-                                let linkMethodNameStringObject = getNameAsString(link_method, thread); 
-                                const stringLinkMethodName = getNameFromStringObject(linkMethodNameStringObject,thread);
-                                log("caller Method : " + stringLinkMethodName);
+                            // by direclyty looking inside the shadow frame, the caller is not avalaible see the code in the draft. 
+                            // so I decided to look at the stack (second time)
+                            // there are two cases in the interpreter; 
+                            ///   1--- If we where already in the interpreter and we have been called by 
+                            ///        docallCommon->PerformCall->ArtInterpreterToInterpreterBridge()
+                            ///         this is an easy option to retrive the caller because it in the caller shadow frame, third parameter of the former function (performCall is inlined)
+                            ///          the firsts parameters are thread and method (so adjacent on the stack,method is at k, and thread at k+1)
+                            ///  2---- If we where not in the interpreter, we are jumping in it 
+                            //            art_quick_to_interpreter_bridge->artQuickToInterpreterBridge->EnterInterpreterFromEntryPoint
+                            //              but little complicated because not sure  if  the sp contains the caller. 
+                            //  In the compile code (the second loop) The call is emulated when invoke_stub is called so the caller is null. 
+                            //firstly I print the stack. 
+                            ///  When looking at the stack the caller method in the case one is used when  the method is compiled PerformCall->artInterpreterToCompile. 
+                            /// And as described in the paper, it is null. 
+                            //scanMemory(thread_stack_pointer, 512);
+                            //log(" method executions stack: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t"));
+                            
+                            while(i < matchList.length){
+                                i++;
+                                let new_thread_stack_pointer: NativePointer = matchList[i].address;
+                                let new_prospective_method: NativePointer = Memory.readPointer(new_thread_stack_pointer.sub(dword_size));
 
-                                let rawLinkClassName: string;
-                                const storage = new StdString();
-                                const link_declaring_classHandle= link_method.add(declaringClassOffset);
-                                const link_declaring_class_ = ptr(Memory.readU32(link_declaring_classHandle));
-                                rawLinkClassName = Memory.readUtf8String(getDescriptor(link_declaring_class_, storage)) as string;   
-                                storage.dispose();
-                                const link_className = rawLinkClassName.substring(1, rawLinkClassName.length - 1).replace(/\//g, ".");
-                                log("caller class Name" + link_className);
+                                if(this.method.equals(new_prospective_method)){
+                                    log("bingo!!!!! ---> we reached the call docallCommon ");
+                                    let caller_shadow_frame: NativePointer = Memory.readPointer(new_thread_stack_pointer.add(dword_size));
+                                    log("caller shadow frame = " + caller_shadow_frame);
+                                    let caller_method: NativePointer = Memory.readPointer(caller_shadow_frame.add(Process.pointerSize));
+                                    log("caller method = " + caller_method);
+                                    if(caller_method.isNull()) {
+                                        log("caller method is null");
+                                        //continue;
+                                    }
+
+                                }
+
                             }
-
-
-                          
-
-                            // user condition on the class name
-
-
-                            log("thisObject=" + thisObject + ", method=" + method + ", descriptor=" + className + ", methodName=" + stringMethodName);
+                            if(i == matchList.length) log("cannot find doCall, the method is called probably by the Jni"); 
+                         
 
 
 
@@ -451,87 +557,11 @@ function makeMethodEntered(): NativePointer {
                             let shadow_frame_vregs_: NativePointer = (prospective_shadowFrame.add(36));
                             let args: NativePointer = shadow_frame_vregs_.add(arg_offset * Process.pointerSize);
                             let args_size: number = shadow_frame_number_vregs - arg_offset; 
-                            log("args pointer = " + args + " size = " + args_size);
-                            let result_register = Memory.readPointer(thread_stack_pointer.add(3*dword_size)); //because the biggest size of Jvalue is 4+4 bytes =2 * dword
+                            log("----> args pointer = " + args + "\n-----> size = " + args_size);
+                            //let result_register = Memory.readPointer(thread_stack_pointer.add(3*dword_size)); //because the biggest size of Jvalue is 4+4 bytes =2 * dword
                             //log("Result register  = " + result_register);
-                            let stay_in_interpreter = Memory.readInt(thread_stack_pointer.add(5*dword_size)); //because the biggest size of Jvalue is 4+4 bytes =2 * dword
+                            //let stay_in_interpreter = Memory.readInt(thread_stack_pointer.add(5*dword_size)); //because the biggest size of Jvalue is 4+4 bytes =2 * dword
                             //log("stay in interpreter = " + stay_in_interpreter);
-                            //TO GET THE SHORTY I NEED TO HAVE THE INTERFACE METHOD FIRST BY USING GetInterfaceMethodIfProxy()
-                            //IN THE ART SOURCE CODE, THIS METHOD CALLS Runtime::Current()->GetClassLinker()->FindMethodForProxy(this); AND RETURN THE RESULT 
-                            // AND BECAUSE THE LATEST IS EXPOSED, I WILL START BY IMPLEMENTING IT, I DONT USE THE CACHE AS IN THE GetInterfaceMethodIfProxy() 
-                            let class_linker: NativePointer = Memory.readPointer(runtime.add(classLinker_offset));  
-                            //log("classLinker : " + class_linker);
-                            let interfaceMethod = findMethodForProxy(class_linker, prospective_method);
-                            //log("Interface Method obtained" + interfaceMethod);
-
-                            // NOW GETTING THE SHORTY FROM THE INTERFACE METHOD (method_index means index in the corresponding method_ids in the dex_file)(and the methood_id is the index in string_ids)
-                            let declaringClass: NativePointer = Memory.readPointer(interfaceMethod);
-                            //log ("Declaring class = " + declaringClass);
-                            let dexCache: NativePointer = Memory.readPointer(declaringClass.add(16));
-                            //log ("Dexcache = " + dexCache);
-                            let dexfile: NativePointer = Memory.readPointer(dexCache.add(16));
-                            //log("dexFile" + dexfile);
-                            let dex_method_index: number = Memory.readU16(interfaceMethod.add(8));
-                            //log("dex_method_index" + dex_method_index);
-                            let method_ids: NativePointer =  Memory.readPointer(dexfile.add(48));
-                            //log("method_ids array" + method_ids);
-                            let proto_index: number = Memory.readU16(method_ids.add(dex_method_index*8 + 2));
-                            //log("proto index " + proto_index);
-                            let proto_ids: NativePointer =  Memory.readPointer(dexfile.add(52));
-                            //log("proto_ids array: " + proto_ids);
-                            let proto_index_final: number  =  ptr(proto_index).add(ptr(proto_index).shl(1)).toInt32();// - ----------------- to see deeply (okay just a compiler trick to multiply by 3)
-                            //log("proto index old:  caller " + proto_index_old);
-                            let proto_id_old: NativePointer = proto_ids.add(proto_index_final * 4);  /// can be used to obtain the return type
-                            //log("proto_id address  " + proto_id_old);
-                            let shorty_idx_old: NativePointer =  Memory.readPointer(proto_id_old);
-                            //log("shorty_idx  old " + shorty_idx_old);
-                            let string_ids: NativePointer = Memory.readPointer(dexfile.add(36));
-                            //log("string_ids array " + string_ids);
-                            let dex_file_begin: NativePointer = Memory.readPointer(dexfile.add(4));
-                            //log("dex_file_begin " + dex_file_begin);
-                            let prototype_string_offset_old: NativePointer = Memory.readPointer(string_ids.add(shorty_idx_old.shl(2))); // or *4
-                            //log("prototype_string offsett old " + prototype_string_offset_old);
-                            if(Memory.readPointer(dex_file_begin.add(prototype_string_offset_old)).equals(NULL)) log("****error in getting the shorty"); 
-                            let prototype_string_address_old: NativePointer = dex_file_begin.add(prototype_string_offset_old.add(1));
-                            //log("prototype_string_address : " + prototype_string_address_old);
-                            let shorty: any =  Memory.readUtf8String(prototype_string_address_old);
-                            log(" shorty = " + shorty);
-                            let type_ids =  Memory.readPointer(dexfile.add(40));
-
-                            if(shorty.length == 1){
-                                //log("need only to obtain the return type");
-                                if(shorty != "L"){
-                                    return_type_string = getPrimitiveTypeAsString(shorty);
-                                }else{
-                                    let return_type_idx: number =  Memory.readU16(proto_id_old.add(4));
-                                    return_type_string = getStringByTypeIndex(type_ids, return_type_idx, string_ids, dex_file_begin);
-                                    log("Return type in string " + return_type_string);
-
-                                }   
-                                break;
-                            }
-
-                            
-                            // Obtaining the parameter list 
-                            let param_type_list: NativePointer = getProtoParameters(proto_id_old, dex_file_begin);
-                            //log(" address of the param type list " + param_type_list + " size " + Memory.readS32(param_type_list));
-
-                            let size =  Memory.readS32(param_type_list);
-                            let param_type_list_elt = param_type_list.add(4);
-                            
-                            
-                            for(let i = 0; i < size; i++) {
-                                let typeItem: NativePointer = param_type_list_elt.add(i*2);
-                                let type_idx: number = Memory.readU16(typeItem);
-                                let descriptor_string = getStringByTypeIndex(type_ids, type_idx, string_ids, dex_file_begin);
-                                log("parameter" + i + "type in string " + descriptor_string);
-
-                            }
-                            let return_type_idx: number =  Memory.readU16(proto_id_old.add(4));
-                            return_type_string = getStringByTypeIndex(type_ids, return_type_idx, string_ids, dex_file_begin);
-                            log("Return type in string " + return_type_string);
-                        }else{
-                            //log("the shadow frame does not have correct values " +  Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t ---->"));
                         }
                         break;
                     }else{
@@ -541,6 +571,81 @@ function makeMethodEntered(): NativePointer {
                     //log("Error!" + error);
                 }
             } while(++i < matchList.length);
+
+            /// NOW PROCESSING THE CASE WHERE THE CODE IS COMPILED
+            if(code_compiled){
+                i = 0; log("---------------->The method code is probably compiled");
+                do { 
+                    let thread_stack_pointer: NativePointer = matchList[i].address;
+                    try{
+                       // IN THIS CASE, WE ARE SURE THAT WE ARE NO LONGER IN THE INTERPRETER CASE AS EXPLAINED ABOVE, BUT WE ARE 
+                                    // PROBABLY IN THE CASE WHERE THE METHOD IS COMPILED, SO WE BREAK AND RESTART THE LOOP TO IDENTIFY ARGUMENTS POINTERS 
+                                    // ON ANOTHER WAY AND POSSIBLY THE CALLER 
+                                    // following this rules in the quick_entry_point_x86.S
+                                    /*
+                                    * Quick invocation stub (non-static).
+                                    * On entry:
+                                    *   [sp] = return address
+                                    *   [sp + 4] = method pointer
+                                    *   [sp + 8] = argument array or null for no argument methods
+                                    *   [sp + 12] = size of argument array in bytes
+                                    *   [sp + 16] = (managed) thread pointer
+                                    *   [sp + 20] = JValue* result
+                                    *   [sp + 24] = shorty
+                                    */
+                        /* If it is the correct one you will have 
+                            --->sp
+                            ---->thread
+                            ---->object
+                            ----->method*/
+                        let prospective_object: NativePointer = Memory.readPointer(thread_stack_pointer.sub(dword_size));
+                        let prospective_method: NativePointer  = Memory.readPointer(thread_stack_pointer.sub(2 * Process.pointerSize));
+                        //log("-----> compiled code");
+                        //log("Prospective object : " + prospective_object);
+                        //log("Object : " + this.object);
+                        //log("Prospective method: " + prospective_method + ", method: "+method);
+                        log("-->this.method: " + this.method + " ---->prospective method: " + prospective_method + "thread stack pointer: " + thread_stack_pointer);
+                        ///// THE TEST I WILL DO IS TRICKY, AN OPTION SHOULD BE TO ITERATE 8 TIMES BECAUSE I AM SURE TO HAVE THE STACK CORRESPONDING TO THE CALL   artInstMethodEntryFromCode
+                        //BUT WHEN REVERSING THE ART ASM CODE OF quick_invoke_stub calling art_quick_inst_entry when invoking the method (the method quick code is replaced by the instrumenter)
+                        // I NOTICED THAT THE STACK SHOULD HAVE A CERTAIN PATTERN (EXPLAINED IN THE PAPER): AT THE SP-POINTER_SIZE, THERE IS THE METHOD POINTER.
+                        if(prospective_method.equals(this.method)){
+                           
+                            let SP: NativePointer = Memory.readPointer(thread_stack_pointer.add(dword_size));
+                            if(Memory.readPointer(SP.sub(dword_size)).equals(method)){
+                                log("Prospective object : " + prospective_object);
+                                log("Object : " + this.object);
+                                log("thread " + thread); 
+                                log("Prospective method: " + prospective_method + ", method: "+method);
+                                log("iteration " + i);
+                                log("---------> Probably the good one");
+                                //let SP_address: NativePointer = thread_stack_pointer.add(dword_size); 
+                                let args: NativePointer = SP.add(17*dword_size); //This is wired I directly look at the stack pattern
+                                if(shorty.length == 1){
+                                    log(" arguments : no arguments to get");
+                                }else{
+                                    log(" arguments : " + args);
+                                }      
+                                break;
+                            }/*else{
+                                log("Bad warning");
+                            }*/
+                        }/*else{
+                            log("---------> Not the good one");
+                            //continue;
+                        }*/
+                    } catch (error) {
+                        //log("Error!" + error);
+                    }
+                } while(++i < matchList.length);
+            }
+
+
+            //////// End of information retrieving
+            var end = new Date().getTime();
+            log("Call to doSomething took " + (end - start) + " milliseconds.")
+            //userTraceCallbacks.onEnter(stringMethodName);
+            //log(" method executions stack: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t"));
+
         },
         onLeave: function (retval) {
         }
@@ -549,6 +654,12 @@ function makeMethodEntered(): NativePointer {
     return callback;
 }
 
+function scanMemory(address: NativePointer, numberBytes: number){
+    log("----> scanning the memory from " + address + " to " + address.add(numberBytes));
+    for(let i = numberBytes/Process.pointerSize; i >= 0; i--){
+        log("-->address: " + address.add(i * Process.pointerSize) + ", value : " + Memory.readPointer(address.add(i * Process.pointerSize)));
+    }
+}
 
 function makeMethodExited(): NativePointer {
     const callback = new NativeCallback((self: NativePointer, thread: NativePointer, thisObject: NativePointer, method: NativePointer, dexPc: number, returnValue: NativePointer): void => {
@@ -585,38 +696,7 @@ function makeFieldWritten(): NativePointer {
     return callback;
 }
 
-class StdString {
-    handle: NativePointer;
 
-    constructor() {    
-        this.handle = Memory.alloc(3 * Process.pointerSize);
-    }
-
-    dispose(): void {
-        if (!this.isTiny()) {
-            //operatorDelete(this.getAllocatedBuffer());
-        }
-    }
-
-    read(): string {
-        //log(hexdump(this.handle, { length: 12 }));
-        let str: string | null = null;
-        if (this.isTiny()) {
-            str = Memory.readUtf8String(this.handle.add(1));  ///////////////////////////  1*Process.pointerSize
-        } else {
-            str = Memory.readUtf8String(this.getAllocatedBuffer());
-        }
-        return (str !== null) ? str : "";
-    }
-    
-    private isTiny(): boolean {
-        return (Memory.readU8(this.handle) & 1) === 0;
-    }
-
-    private getAllocatedBuffer(): NativePointer {
-        return Memory.readPointer(this.handle.add(2 * Process.pointerSize));
-    }
-}
 //state of the stack
 // arg1
 // arg0
@@ -626,10 +706,11 @@ class StdString {
 type ModuleHandle = NativePointer;
 type DlopenFunc = (name: string) => ModuleHandle;
 type DlsymFunc = (moduleHandle: ModuleHandle, name: string) => NativePointer;
-
 function getDlopen(): DlopenFunc {
+    /*if(Process.arch == "ia32"){
+        return x86_tracer_tools.getDlopen();
+    }*/
     const impl = Module.findExportByName(null, "dlopen");
-
     let cur = impl;
     let callsSeen = 0;
     let picValue: any = null;
@@ -659,8 +740,42 @@ function getDlopen(): DlopenFunc {
         cur = insn.next;
     }
 }
+function makeDlopenWrapper(innerDlopenImpl: NativePointer, picValue: NativePointer): DlopenFunc {
+    const trampoline = Memory.alloc(Process.pageSize);
+    Memory.patchCode(trampoline, 16, code => {
+        const cw = new X86Writer(code, { pc: trampoline });
+        cw.putMovRegAddress("ebx", picValue);
+        cw.putJmpAddress(innerDlopenImpl);
+        cw.flush();
+    });
 
-/* struct ProtoId {
+    const innerModifiedDlopen: any = new NativeFunction(trampoline, "pointer", ["pointer", "int", "pointer"]);
+    const addressInsideLibc = Module.findExportByName("libc.so", "read");
+    
+    //innerDlopen.trampoline = trampoline;
+
+    return function (path: string): NativePointer {
+        const handle = innerModifiedDlopen(Memory.allocUtf8String(path), 3, addressInsideLibc);
+        if (handle.isNull()) {
+            const dlerror: any = new NativeFunction(Module.findExportByName(null, "dlerror") as NativePointer, "pointer", []);
+            throw new Error("Unable to load helper: " + Memory.readUtf8String(dlerror()));
+        }
+        return handle;
+    };
+}
+function getDlsym(): DlsymFunc {
+    const dlsym: any = new NativeFunction(Module.findExportByName(null, "dlsym") as NativePointer, "pointer", ["pointer", "pointer"]);
+    return function (moduleHandle: ModuleHandle, name: string): NativePointer {
+        const address = dlsym(moduleHandle, Memory.allocUtf8String(name));
+        if (address.isNull()) {
+            throw new Error(`Symbol not found: ${name}`);
+        }
+        return address;
+    };
+}
+
+
+/*/* struct ProtoId {
     dex::StringIndex shorty_idx_;     // index into string_ids array for shorty descriptor
     dex::TypeIndex return_type_idx_;  // index into type_ids array for return type
     uint16_t pad_;                    // padding = 0
@@ -668,16 +783,7 @@ function getDlopen(): DlopenFunc {
 
    private:
     DISALLOW_COPY_AND_ASSIGN(ProtoId);
-  };
-                             const TypeList* GetProtoParameters(const ProtoId& proto_id) const {
-                                    if (proto_id.parameters_off_ == 0) {
-                                    return nullptr;
-                                    } else {
-                                    const uint8_t* addr = begin_ + proto_id.parameters_off_;
-                                    return reinterpret_cast<const TypeList*>(addr);
-                                    }
-                                }
-                            */
+  };*/
 function getProtoParameters(protoId: NativePointer, dex_file_begin: NativePointer): NativePointer{
     let result: NativePointer = NULL;
     let parameter_off_: number = Memory.readU32(protoId.add(8));
@@ -721,42 +827,6 @@ function getPrimitiveTypeAsString(type: any): string|null{
             return "NotRecognised";
         } 
 }
-
-function makeDlopenWrapper(innerDlopenImpl: NativePointer, picValue: NativePointer): DlopenFunc {
-    const trampoline = Memory.alloc(Process.pageSize);
-    Memory.patchCode(trampoline, 16, code => {
-        const cw = new X86Writer(code, { pc: trampoline });
-        cw.putMovRegAddress("ebx", picValue);
-        cw.putJmpAddress(innerDlopenImpl);
-        cw.flush();
-    });
-
-    const innerModifiedDlopen: any = new NativeFunction(trampoline, "pointer", ["pointer", "int", "pointer"]);
-    const addressInsideLibc = Module.findExportByName("libc.so", "read");
-    
-    //innerDlopen.trampoline = trampoline;
-
-    return function (path: string): NativePointer {
-        const handle = innerModifiedDlopen(Memory.allocUtf8String(path), 3, addressInsideLibc);
-        if (handle.isNull()) {
-            const dlerror: any = new NativeFunction(Module.findExportByName(null, "dlerror") as NativePointer, "pointer", []);
-            throw new Error("Unable to load helper: " + Memory.readUtf8String(dlerror()));
-        }
-        return handle;
-    };
-}
-
-function getDlsym(): DlsymFunc {
-    const dlsym: any = new NativeFunction(Module.findExportByName(null, "dlsym") as NativePointer, "pointer", ["pointer", "pointer"]);
-    return function (moduleHandle: ModuleHandle, name: string): NativePointer {
-        const address = dlsym(moduleHandle, Memory.allocUtf8String(name));
-        if (address.isNull()) {
-            throw new Error(`Symbol not found: ${name}`);
-        }
-        return address;
-    };
-}
-
 function printAsmExploreCallsGetShorty(impl: NativePointer, nlines: number): void{  
     let counter = 0;
     let cur: NativePointer = impl;
@@ -892,94 +962,7 @@ function patchAttachCurrentThread(): void{
     printAsm(calledFunction,1000);
 }*/
 
-class StdInstrumentationStackDeque {
-    // from the class definition https://github.com/llvm-mirror/libcxx/blob/master/include/deque
-    // line 959 you have three parameters 
-    // to simplify we remove the private inerhitrance with deque_base
-    handle: NativePointer;
-    __start_ : number = 0;
-    //__block_size is a const (line 945). Initialized (line 1037)
-    // in the __deque_block_size struct value_type size is 20 and 
-    // refferring to the line  276 it is < 256 , so we have 4096/20 =~ 204
-    __block_size : number = 204; 
-    constructor(handle_: NativePointer) {
-        //log(" we construct the stack object"); 
-        let __start_Offset  = 4*Process.pointerSize; 
-        this.handle = handle_;
-        this.__start_ = Memory.readUInt(handle_.add(__start_Offset));
-        
-    }
 
-    // actualize other attributes at every read
-
-    size(): number {
-        // it is in the third parameter, first element of the compressed pair  https://www.boost.org/doc/libs/1_47_0/boost/detail/compressed_pair.hpp  
-        let sizeOffset = 5*Process.pointerSize;
-        let result = Memory.readUInt(this.handle.add(sizeOffset));  
-        //log ("- size of the instrumentation queue : " + result);
-        return result;
-    }
-
-    __map_begin(): NativePointer {
-        // it is in  the first parameter __map_,   witch is a split_buffer 
-        // https://github.com/google/libcxx/blob/master/include/__split_buffer line 47  
-        let sizeOffset = 1*Process.pointerSize;
-        let result = Memory.readPointer(this.handle.add(sizeOffset)); 
-        //log ("- begin of the  map in instrumentation queue : " + result); 
-        return result;
-    }
-
-    __map_end(): NativePointer {
-        // it is in  the first parameter __map_,   witch is a split_buffer 
-        // https://github.com/google/libcxx/blob/master/include/__split_buffer line 48 
-        let endOffset = 2*Process.pointerSize;
-        let result = Memory.readPointer(this.handle.add(endOffset));  
-        //log ("- end of the map of the instrumentation queue : " + result);
-        return result;
-    }
-    __map_empty(): boolean {
-        // it is compute from   the first parameter  __map_, witch is a split_buffer 
-        // https://github.com/google/libcxx/blob/master/include/__split_buffer line 85
-        let result =  this.__map_end().compare(this.__map_begin()) == 0;
-        //log ("- map  of the instrumentation queue  is empty: " + result);
-        return result;
-    }
-    
-    refresh(){
-        let __start_Offset  = 4*Process.pointerSize; 
-        this.__start_ = Memory.readUInt(this.handle.add(__start_Offset));
-        //log ("- start offset in the map of the instrumentation queue : " + this.__start_);
-    }
-    front(): NativePointer {
-        // here we don't dereference the result, it is still a pointer 
-        // defined at line 1788 https://github.com/llvm-mirror/libcxx/blob/master/include/deque
-        this.refresh();
-        log("---  we get the front of the deque"); 
-        let __p : number =  this.__start_;
-        log(" value of p " + __p); 
-        let  __mp : NativePointer = this.__map_begin().add(Math.floor(__p / this.__block_size) * Process.pointerSize) ;
-        log (" processing the __mp : " + __mp + " with ratio p/size : " +  Math.floor(__p / this.__block_size)
-                                 + " p%size = " + __p % this.__block_size);
-        let result : NativePointer = Memory.readPointer(__mp).add((__p % this.__block_size) * Process.pointerSize);
-        log("final result " + result );
-        return result;
-    } 
-
-    back(): NativePointer {
-        // here we don't dereference the result, it is still a pointer 
-        // defined at line 1815 https://github.com/llvm-mirror/libcxx/blob/master/include/deque
-        this.refresh();
-        log("---  we get the front of the deque"); 
-        let __p : number =  this.size() + this.__start_ - 1;
-        log(" value of p " + __p); 
-        let  __mp : NativePointer = this.__map_begin().add(Math.floor(__p / this.__block_size) * Process.pointerSize) ;
-        log (" processing the __mp : " + __mp + " with ratio p/size : " +  Math.floor(__p / this.__block_size)
-                                 + " p%size = " + __p % this.__block_size);
-        let result : NativePointer = Memory.readPointer(__mp).add((__p % this.__block_size) * Process.pointerSize);
-        log("final result " + result );
-        return result;
-    } 
-}
 
 /*
 
@@ -1324,7 +1307,80 @@ for (i = 0; i<= 216 ; i++){
     if (Memory.readS8(instrumentation.add(216-i)) == 0 || Memory.readS8(instrumentation.add(216-i)) == 1)
     {log("boolean offset : " + (216-i) + "value : " + Memory.readS8(instrumentation.add(216-i)));}
 } 
+    HELPER CODE
+        log("preparing and call deoptimization");
+        const prepareDoptimization: any = new NativeFunction(
+        dlsym(helper, "ath_prepare_call_deoptimisation"), 
+        "pointer", 
+        ["pointer","pointer","pointer"]
+        ,{
+            exceptions: ExceptionsBehavior.Propagate
+     });
+     /log(`helper module: ${helper.toString()}`);
+        /*const getOffsetOfRuntimeInstrumentation: any = new NativeFunction(dlsym(helper, "ath_get_offset_of_runtime_instrumentation"), "uint", []);
+        log("we think instrumentation is at offset " + instrumentationOffset + ", helper thinks it's at " + getOffsetOfRuntimeInstrumentation());    
+        
+        const getOffsetOfClassIftable: any = new NativeFunction(dlsym(helper, "ath_get_offset_of_class_iftable_"), "uint", []);
+        log("we think  types ids is at offset " + 16 + ", helper thinks it's at " + getOffsetOfClassIftable());    
+        */
 
+        
+        //const getMethoyTryCallShorty: any = new NativeFunction(dlsym(helper, "ath_get_method_try_call_shorty"), "pointer", ["pointer"]);
+        //log("///////looking inside the getShorty() source code");
+        //printAsmExploreShorty(getMethoyTryCallShorty, 1000);
+        //const getMethoyTryCallGetInterfaceIfProxy: any = new NativeFunction(dlsym(helper, "ath_get_method_try_call_get_interface_if_proxy"), "pointer", ["pointer"]);
+        //log("helper think ath_get_method_try_call_shorty is  " + getMethoyTryCallShorty());
+        //log("getInterfaceMethodIfProxy()");
+        //printAsmExploreShorty(getMethoyTryCallGetInterfaceIfProxy, 1000);
+        //const getMethodShorty: any = new NativeFunction(dlsym(helper, "ath_get_method_shorty_"), "pointer", ["pointer"]);
+        /*log("method Shorty code ");
+        printAsm(getMethodShorty, 1000);*/
+        /*const helperGetShorty: any = new NativeFunction(
+        dlsym(helper,"_ZN3art9ArtMethod9GetShortyEv"),
+        "pointer",
+        [],
+        {
+            exceptions: ExceptionsBehavior.Propagate
+        });
+        log("address of getShorty in the helper" + helperGetShorty);*/
+        //printAsmExploreCallsGetShorty(helperGetShorty,1000)
+       
+       //log("address of runtimeAttachCurrentThread in the helper" + runtimeAttachCurrentThread);
+        //printAsmExploreCallsGetShorty(helperGetShorty,1000)
+    
+    
+        /*const mirror_FindDeclaredDirectMethodByName: any = new NativeFunction(
+        dlsym(artlib,"_ZN3art6mirror5Class30FindDeclaredDirectMethodByNameERKNS_11StringPieceENS_11PointerSizeE"),
+        "pointer",
+        ["pointer","pointer"],
+        {
+            exceptions: ExceptionsBehavior.Propagate
+        });
+        log("printing the address of mirror_FindDeclaredDirectMethodByName " + mirror_FindDeclaredDirectMethodByName);
+        log("code : \n ");
+        printAsm(mirror_FindDeclaredDirectMethodByName, 1000);*/
+
+        /*const instrumentationListener_MethodExited: any = new NativeFunction(
+        dlsym(artlib,"_ZN3art15instrumentation23InstrumentationListener12MethodExitedEPNS_6ThreadENS_6HandleINS_6mirror6ObjectEEEPNS_9ArtMethodEjS7_"),
+        "void",
+        ["pointer","pointer","pointer","uint32","pointer"],
+        {
+            exceptions: ExceptionsBehavior.Propagate
+        });
+        log("printing the address of instrumentationListener_MethodExited " + instrumentationListener_MethodExited);
+        log("code : \n ");
+        printAsm(instrumentationListener_MethodExited, 1000);
+    
+        const trace_GetMethodLine: any = new NativeFunction(
+        dlsym(artlib,"_ZN3art5Trace13GetMethodLineEPNS_9ArtMethodE"),
+        "pointer",
+        ["pointer"],
+        {
+            exceptions: ExceptionsBehavior.Propagate
+        });
+        log("printing the address of Trace::GetMethodLine " + trace_GetMethodLine);
+        log("code : \n ");
+        printAsm(trace_GetMethodLine, 1000);
 -----------------------> modification needed to activate the deoptimization directly in the app config
 to test in app <application
 android:icon="@mipmap/ic_launcher"
@@ -1453,4 +1509,29 @@ let result : NativePointer = this.__map_empty() ?
                                 Memory.readPointer(__mp).add((__p % this.__block_size));
 log("final result " + result );
 return result;
-}*/
+}
+
+
+------------------------------> // by direclyty looking inside the shadow frame, the caller is not avalaible see the code in the draft. 
+                            let link_shadow_frame: NativePointer = Memory.readPointer(prospective_shadowFrame);
+                            if(link_shadow_frame.isNull){
+                                log("caller name is not avalaible");
+                            }else{
+                                log("caller shadow frame address " + link_shadow_frame);
+                                let link_method: NativePointer = Memory.readPointer(link_shadow_frame.add(1*Process.pointerSize));
+                                let linkMethodNameStringObject = getNameAsString(link_method, thread); 
+                                const stringLinkMethodName = getNameFromStringObject(linkMethodNameStringObject,thread);
+                                log("caller Method : " + stringLinkMethodName);
+
+                                let rawLinkClassName: string;
+                                const storage = new StdString();
+                                const link_declaring_classHandle= link_method.add(declaringClassOffset);
+                                const link_declaring_class_ = ptr(Memory.readU32(link_declaring_classHandle));
+                                rawLinkClassName = Memory.readUtf8String(getDescriptor(link_declaring_class_, storage)) as string;   
+                                storage.dispose();
+                                const link_className = rawLinkClassName.substring(1, rawLinkClassName.length - 1).replace(/\//g, ".");
+                                log("caller class Name" + link_className);
+                            }
+
+
+*/

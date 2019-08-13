@@ -13,21 +13,20 @@ deploy: build/libart-tracer-helper.so
 
 build/build.ninja: meson.build
 	rm -rf build
-	. $$FRIDA/build/frida-meson-env-$(build_platform)-x86_64.rc \
-		&& python3 $$FRIDA/releng/meson/meson.py \
-			--buildtype minsize \
-			--cross-file $$FRIDA/build/frida-android-x86.txt \
+	sed -i "s@ndk_toolchain_value@$$NDK_TOOLCHAIN@g" meson_options.txt
+	   rm -rf build && mkdir build
+	   meson \
+			--cross-file cross_file.txt \
 			build .
 	@touch $@
 
 build/libart-tracer-helper.so: build/build.ninja helper.cpp
 	@cd ../ext/art/runtime \
-		&& for header in runtime.h class_linker.h java_vm_ext.h thread.h art_method.h; do \
+		&& for header in runtime.h class_linker.h java_vm_ext.h thread.h art_method.h interpreter/shadow_frame.h ; do \
 			sed -i -e "s/private:/public:/g" $$header; \
 			sed -i -e "s/protected:/public:/g" $$header; \
 		done
-	. $$FRIDA/build/frida-meson-env-$(build_platform)-x86_64.rc \
-		&& ninja -C build
+	ninja -C build
 	@touch $@
 
 .PHONY: build deploy
