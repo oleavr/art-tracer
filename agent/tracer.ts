@@ -2,7 +2,7 @@ import * as Java from "frida-java";
 import { getApi } from "frida-java/lib/android";
 import { getArtThreadFromEnv } from "frida-java/lib/android";
 import { log } from "./logger";
-import { test_client } from "./client_logger";
+import { test_client, send_log } from "./client_logger";
 import  VM  from "frida-java/lib/vm"
 import { prototype } from "stream";
 import { print } from "util";
@@ -37,7 +37,7 @@ let listener: NativePointer;
 try {
     listener = makeListener();
 } catch (e) {
-    log("Shit: " + e.stack);
+    add_to_log("Shit: " + e.stack);
 }
 
 const runtime = api.artRuntime;
@@ -143,8 +143,23 @@ const fclose: any = new NativeFunction(
 const declaringClassOffset = 0;
 
 
+var log_bloc: string = "";
+var number_of_block_send = 0;
+var current_number_of_lines = 0; 
 
-
+function add_to_log(string: String){
+    if (current_number_of_lines >  100){
+        send_log(log_bloc);
+        log_bloc = "";
+        current_number_of_lines = 0;
+        number_of_block_send = number_of_block_send + 1;
+        log("++>NEW BLOCK SENT: " + number_of_block_send);
+    } else {
+        log_bloc = log_bloc + string;
+        current_number_of_lines++;
+        log(" adding new line " + current_number_of_lines);
+    }
+}
 
 
     
@@ -155,6 +170,10 @@ export function trace(userTraceCallbacks_: TraceCallbacks, methodRegex_: RegExp 
     Java.perform(() => {
         log("trace() starting up 1");
         test_client();
+        send_log("first bloc");
+        
+
+
 
 /*
 to implement to log 
@@ -233,8 +252,8 @@ void WriteLogFile(const char* szString)
 
         if(Process.arch == "ia32") log("----------////////////// Archictecture  "  +   Process.arch);
      
-        //deoptimizeEverything(instrumentation, Memory.allocUtf8String("frida"));
-        //addListener(instrumentation, listener, InstrumentationEvent.MethodEntered /* | InstrumentationEvent.MethodExited | InstrumentationEvent.FieldRead | InstrumentationEvent.FieldWritten*/);
+        deoptimizeEverything(instrumentation, Memory.allocUtf8String("frida"));
+        addListener(instrumentation, listener, InstrumentationEvent.MethodEntered /* | InstrumentationEvent.MethodExited | InstrumentationEvent.FieldRead | InstrumentationEvent.FieldWritten*/);
         
 
 
@@ -354,9 +373,9 @@ function makeMethodEntered(): NativePointer {
             const stringMethodName = getNameFromStringObject(methodNameStringObject,thread);
 
             /// user condition on the method Name
-            log("testing method name" + stringMethodName + "regex " + methodRegex); 
+            add_to_log("testing method name" + stringMethodName + "regex " + methodRegex); 
             if(!methodRegex.test(stringMethodName as string)){
-                log("method name does not match");
+                add_to_log("method name does not match");
                 return;  
             }
           
@@ -371,13 +390,13 @@ function makeMethodEntered(): NativePointer {
             rawClassName = Memory.readUtf8String(getDescriptor(declaring_class_, storage)) as string;   
             storage.dispose();
             const className = rawClassName.substring(1, rawClassName.length - 1).replace(/\//g, ".");
-            log("testing class name");
+            add_to_log("testing class name");
             if(!classRegex.test(className)){
-                log("class name does not match");
+                add_to_log("class name does not match");
                 return;
             }
 
-            log("thisObject=" + thisObject + ", \n method=" + method + ",\n descriptor=" + className + ",\n methodName=" + stringMethodName);
+            add_to_log("thisObject=" + thisObject + ", \n method=" + method + ",\n descriptor=" + className + ",\n methodName=" + stringMethodName);
 
             // NOW LOOKING FOR THE SHORTY AND FOR THE ARGUMENTS
 
@@ -423,7 +442,7 @@ function makeMethodEntered(): NativePointer {
             let prototype_string_address_old: NativePointer = dex_file_begin.add(prototype_string_offset_old.add(1));
             //log("prototype_string_address : " + prototype_string_address_old);
             let shorty: any =  Memory.readUtf8String(prototype_string_address_old);
-            log(" shorty = " + shorty);
+            add_to_log(" shorty = " + shorty);
             let type_ids =  Memory.readPointer(dexfile.add(40));
 
             if(shorty.length == 1){
@@ -433,7 +452,7 @@ function makeMethodEntered(): NativePointer {
                 }else{
                     let return_type_idx: number =  Memory.readU16(proto_id_old.add(4));
                     return_type_string = getStringByTypeIndex(type_ids, return_type_idx, string_ids, dex_file_begin);
-                    log("Return type in string " + return_type_string);
+                    add_to_log("Return type in string " + return_type_string);
 
                 }   
                 //break;
@@ -450,12 +469,12 @@ function makeMethodEntered(): NativePointer {
                     let typeItem: NativePointer = param_type_list_elt.add(i*2);
                     let type_idx: number = Memory.readU16(typeItem);
                     let descriptor_string = getStringByTypeIndex(type_ids, type_idx, string_ids, dex_file_begin);
-                    log("parameter" + i + "type in string " + descriptor_string);
+                    add_to_log("parameter" + i + "type in string " + descriptor_string);
 
                 }
                 let return_type_idx: number =  Memory.readU16(proto_id_old.add(4));
                 return_type_string = getStringByTypeIndex(type_ids, return_type_idx, string_ids, dex_file_begin);
-                log("Return type in string " + return_type_string);
+                add_to_log("Return type in string " + return_type_string);
 
 
             }  
@@ -491,7 +510,7 @@ function makeMethodEntered(): NativePointer {
                                  following this rules in the quick_entry_point_x86.S
                               */
                         code_compiled = true; 
-                        log("Probably we are with a compiled source code");
+                        add_to_log("Probably we are with a compiled source code");
                         break;
                     }
 
@@ -506,8 +525,8 @@ function makeMethodEntered(): NativePointer {
                         if(number_inputs <= number_registers){
                             //log(" //////////////start/////////////");
                             //log("Method: " + prospective_method);
-                            log("Shadow frame :" + prospective_shadowFrame + " thread position " + i);
-                            log("thread : " + thread);
+                            add_to_log("Shadow frame :" + prospective_shadowFrame + " thread position " + i);
+                            add_to_log("thread : " + thread);
 
                             /// GETTING THE CALLER NAME AND HIS ClASS NAME TO TEST..
                             // by direclyty looking inside the shadow frame, the caller is not avalaible see the code in the draft. 
@@ -533,20 +552,20 @@ function makeMethodEntered(): NativePointer {
                                 let new_prospective_method: NativePointer = Memory.readPointer(new_thread_stack_pointer.sub(dword_size));
 
                                 if(this.method.equals(new_prospective_method)){
-                                    log("bingo!!!!! ---> we reached the call docallCommon ");
+                                    add_to_log("bingo!!!!! ---> we reached the call docallCommon ");
                                     let caller_shadow_frame: NativePointer = Memory.readPointer(new_thread_stack_pointer.add(dword_size));
-                                    log("caller shadow frame = " + caller_shadow_frame);
+                                    add_to_log("caller shadow frame = " + caller_shadow_frame);
                                     let caller_method: NativePointer = Memory.readPointer(caller_shadow_frame.add(Process.pointerSize));
-                                    log("caller method = " + caller_method);
+                                    add_to_log("caller method = " + caller_method);
                                     if(caller_method.isNull()) {
-                                        log("caller method is null");
+                                        add_to_log("caller method is null");
                                         //continue;
                                     }
 
                                 }
 
                             }
-                            if(i == matchList.length) log("cannot find doCall, the method is called probably by the Jni"); 
+                            if(i == matchList.length) add_to_log("cannot find doCall, the method is called probably by the Jni"); 
                          
 
 
@@ -557,7 +576,7 @@ function makeMethodEntered(): NativePointer {
                             let shadow_frame_vregs_: NativePointer = (prospective_shadowFrame.add(36));
                             let args: NativePointer = shadow_frame_vregs_.add(arg_offset * Process.pointerSize);
                             let args_size: number = shadow_frame_number_vregs - arg_offset; 
-                            log("----> args pointer = " + args + "\n-----> size = " + args_size);
+                            add_to_log("----> args pointer = " + args + "\n-----> size = " + args_size);
                             //let result_register = Memory.readPointer(thread_stack_pointer.add(3*dword_size)); //because the biggest size of Jvalue is 4+4 bytes =2 * dword
                             //log("Result register  = " + result_register);
                             //let stay_in_interpreter = Memory.readInt(thread_stack_pointer.add(5*dword_size)); //because the biggest size of Jvalue is 4+4 bytes =2 * dword
@@ -574,7 +593,7 @@ function makeMethodEntered(): NativePointer {
 
             /// NOW PROCESSING THE CASE WHERE THE CODE IS COMPILED
             if(code_compiled){
-                i = 0; log("---------------->The method code is probably compiled");
+                i = 0; add_to_log("---------------->The method code is probably compiled");
                 do { 
                     let thread_stack_pointer: NativePointer = matchList[i].address;
                     try{
@@ -604,7 +623,7 @@ function makeMethodEntered(): NativePointer {
                         //log("Prospective object : " + prospective_object);
                         //log("Object : " + this.object);
                         //log("Prospective method: " + prospective_method + ", method: "+method);
-                        log("-->this.method: " + this.method + " ---->prospective method: " + prospective_method + "thread stack pointer: " + thread_stack_pointer);
+                        add_to_log("-->this.method: " + this.method + " ---->prospective method: " + prospective_method + "thread stack pointer: " + thread_stack_pointer);
                         ///// THE TEST I WILL DO IS TRICKY, AN OPTION SHOULD BE TO ITERATE 8 TIMES BECAUSE I AM SURE TO HAVE THE STACK CORRESPONDING TO THE CALL   artInstMethodEntryFromCode
                         //BUT WHEN REVERSING THE ART ASM CODE OF quick_invoke_stub calling art_quick_inst_entry when invoking the method (the method quick code is replaced by the instrumenter)
                         // I NOTICED THAT THE STACK SHOULD HAVE A CERTAIN PATTERN (EXPLAINED IN THE PAPER): AT THE SP-POINTER_SIZE, THERE IS THE METHOD POINTER.
@@ -612,18 +631,18 @@ function makeMethodEntered(): NativePointer {
                            
                             let SP: NativePointer = Memory.readPointer(thread_stack_pointer.add(dword_size));
                             if(Memory.readPointer(SP.sub(dword_size)).equals(method)){
-                                log("Prospective object : " + prospective_object);
-                                log("Object : " + this.object);
-                                log("thread " + thread); 
-                                log("Prospective method: " + prospective_method + ", method: "+method);
-                                log("iteration " + i);
-                                log("---------> Probably the good one");
+                                add_to_log("Prospective object : " + prospective_object);
+                                add_to_log("Object : " + this.object);
+                                add_to_log("thread " + thread); 
+                                add_to_log("Prospective method: " + prospective_method + ", method: "+method);
+                                add_to_log("iteration " + i);
+                                add_to_log("---------> Probably the good one");
                                 //let SP_address: NativePointer = thread_stack_pointer.add(dword_size); 
                                 let args: NativePointer = SP.add(17*dword_size); //This is wired I directly look at the stack pattern
                                 if(shorty.length == 1){
-                                    log(" arguments : no arguments to get");
+                                    add_to_log(" arguments : no arguments to get");
                                 }else{
-                                    log(" arguments : " + args);
+                                    add_to_log(" arguments : " + args);
                                 }      
                                 break;
                             }/*else{
@@ -642,7 +661,7 @@ function makeMethodEntered(): NativePointer {
 
             //////// End of information retrieving
             var end = new Date().getTime();
-            log("Call to doSomething took " + (end - start) + " milliseconds.")
+            add_to_log("Call to doSomething took " + (end - start) + " milliseconds.")
             //userTraceCallbacks.onEnter(stringMethodName);
             //log(" method executions stack: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t"));
 
@@ -655,9 +674,9 @@ function makeMethodEntered(): NativePointer {
 }
 
 function scanMemory(address: NativePointer, numberBytes: number){
-    log("----> scanning the memory from " + address + " to " + address.add(numberBytes));
+    add_to_log("----> scanning the memory from " + address + " to " + address.add(numberBytes));
     for(let i = numberBytes/Process.pointerSize; i >= 0; i--){
-        log("-->address: " + address.add(i * Process.pointerSize) + ", value : " + Memory.readPointer(address.add(i * Process.pointerSize)));
+        add_to_log("-->address: " + address.add(i * Process.pointerSize) + ", value : " + Memory.readPointer(address.add(i * Process.pointerSize)));
     }
 }
 
@@ -671,7 +690,7 @@ function makeMethodExited(): NativePointer {
 
 function makeListenerMethod(name: string): NativePointer {
     const callback = new NativeCallback((self: NativePointer, thread: NativePointer): void => {
-        log(name + " was called!");
+        add_to_log(name + " was called!");
     }, "void", ["pointer", "pointer"]);
     retainedHandles.push(callback);
 
@@ -680,7 +699,7 @@ function makeListenerMethod(name: string): NativePointer {
 
 function makeFieldRead(): NativePointer {
     const callback = new NativeCallback((self: NativePointer, thread: NativePointer, thisObject: NativePointer, method: NativePointer, dexPc: number, field: NativePointer): void => {
-        log("FieldRead() thisObject=" + thisObject + " method=" + method+ " fieldObject="+field);
+        add_to_log("FieldRead() thisObject=" + thisObject + " method=" + method+ " fieldObject="+field);
     }, "void", ["pointer", "pointer", "pointer", "pointer", "uint32","pointer"]);
     retainedHandles.push(callback);
 
@@ -689,7 +708,7 @@ function makeFieldRead(): NativePointer {
 
 function makeFieldWritten(): NativePointer {
     const callback = new NativeCallback((self: NativePointer, thread: NativePointer, thisObject: NativePointer, method: NativePointer, dexPc: number, field: NativePointer, field_value: NativePointer): void => {
-        log("FieldWritten() thisObject=" + thisObject + " method=" + method);
+        add_to_log("FieldWritten() thisObject=" + thisObject + " method=" + method);
     }, "void", ["pointer", "pointer", "pointer", "pointer", "uint32","pointer","pointer"]);
     retainedHandles.push(callback);
 
@@ -835,16 +854,16 @@ function printAsmExploreCallsGetShorty(impl: NativePointer, nlines: number): voi
     let innerFunction: NativePointer = NULL;
     while (counter < nlines) {    
         const insn = Instruction.parse(cur);
-        log(insn.address + "-->  ......... " + insn.toString()); 
+        add_to_log(insn.address + "-->  ......... " + insn.toString()); 
         switch (insn.mnemonic) {
             case "call":
                 callsSeen++;
                 if (callsSeen === 1){
-                    log("computing the ebx value");
+                    add_to_log("computing the ebx value");
                     let eax = ptr(insn.operands[0].value);
-                    log("eax will have " + eax);
+                    add_to_log("eax will have " + eax);
                     ebx = eax.add(ptr("0x13f17")); 
-                    log("and ebx =" + ebx);
+                    add_to_log("and ebx =" + ebx);
                 }if (callsSeen === 2) {
                     innerFunction = ptr(insn.operands[0].value);
                    
@@ -916,7 +935,7 @@ function patchInvoke(): void{
             //let current_args = Memory.readPointer(current_sp.add(dword_size*3));
             let prospective_shorty = Memory.readPointer(current_sp.add(dword_size*6));
             //log("---->shorty address = " + prospective_shorty + " thread  = " + this.thread + " args = " + this.args + " method = " + this.method + "-" + stringMethodName);
-            log("---->invokef: called from: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t ---->"));
+            add_to_log("---->invokef: called from: " + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join("\n\t ---->"));
 
              //log(" first character = " + Memory.readUtf8String(prospective_shorty, 1)); 
             //log("this.threadId = " + this.threadId);
